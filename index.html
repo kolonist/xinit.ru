@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#020503">
+  <title>xinit.ru</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="screen" aria-label="Терминал">
+    <div class="glare" aria-hidden="true"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+    <div class="terminal" id="terminal" aria-live="polite">
+      <div class="history" id="history"></div>
+      <p class="prompt"><span class="path" id="prompt-path">xinit</span><span class="separator">:</span><span class="directory" id="prompt-directory">~</span><span class="sign" id="prompt-sign">$</span><span class="input" id="input"></span><span class="cursor" aria-hidden="true"></span></p>
+    </div>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
