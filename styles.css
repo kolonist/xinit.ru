@@ -82,6 +82,7 @@ body {
   margin: 0 0 .18em;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .history .command { color: var(--phosphor-bright); }
@@ -92,12 +93,14 @@ body {
 .history .alert { color: #d0ffd5; text-shadow: 0 0 8px currentColor; }
 
 .prompt {
-  display: flex;
-  align-items: center;
+  display: block;
   margin: 0;
   min-height: 1.45em;
   color: var(--phosphor);
   letter-spacing: .015em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .prompt.is-busy { display: none; }
@@ -109,9 +112,11 @@ body {
 .input { margin-left: .5em; color: var(--phosphor-bright); }
 
 .cursor {
+  display: inline-block;
   width: .62em;
   height: 1.05em;
   margin-left: .42em;
+  vertical-align: -.15em;
   background: var(--phosphor-bright);
   box-shadow: 0 0 7px var(--phosphor), 0 0 16px rgba(115,255,134,.5);
   animation: blink 1.2s steps(1, end) infinite;
