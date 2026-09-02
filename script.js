@@ -34,12 +34,16 @@ const decoyFiles = [
   ['/opt/bm/archive/audio/transcript_04.txt', ['CHANNEL: UNKNOWN', 'LANGUAGE: [UNRESOLVED]', 'SIGNAL LOST AT 03:17:22']]
 ];
 
-function addLine(text, className = 'output') {
+async function printLine(text, className = 'output', speed = 7) {
   const line = document.createElement('p');
   line.className = className;
-  line.textContent = text;
   history.appendChild(line);
-  terminal.scrollTop = terminal.scrollHeight;
+
+  for (const character of text) {
+    line.textContent += character;
+    terminal.scrollTop = terminal.scrollHeight;
+    await wait(speed + Math.random() * 6);
+  }
 }
 
 function commitCommandLine() {
@@ -72,8 +76,8 @@ async function command(text, output = [], pause = 900, nextPrompt = null) {
   input.textContent = '';
   prompt.classList.add('is-busy');
   for (const item of output) {
-    await wait(320 + Math.random() * 280);
-    addLine(item.text || item, item.className || 'output');
+    await wait(110 + Math.random() * 110);
+    await printLine(item.text || item, item.className || 'output');
   }
   if (output.length > 0) {
     await wait(320);
@@ -115,7 +119,7 @@ async function bruteForce() {
   }
 
   await wait(320);
-  addLine('PASSWORD FOUND — saved to ./passwd', 'alert');
+  await printLine('PASSWORD FOUND — saved to ./passwd', 'alert', 9);
   await wait(650);
   prompt.classList.remove('is-busy');
   await wait(1000);
