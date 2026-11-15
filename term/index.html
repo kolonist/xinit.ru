@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#09121b">
+  <title>Снимок терминала · xinit.ru</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script src="localization.js" defer></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <header class="site-bar">
+    <nav class="top-menu" data-i18n-label="navigation" aria-label="Навигация">
+      <a class="home-link" href="/"><span aria-hidden="true">←</span> <span class="home-label" data-i18n="home">На главную</span></a>
+      <div class="top-menu-tools">
+        <a class="telegram-link" href="https://t.me/lofi_dev"
+          data-i18n-label="telegram" data-i18n-title="telegram"
+          aria-label="Telegram-канал Lofi Developer" title="Telegram-канал Lofi Developer">
+          <span class="telegram-icon" aria-hidden="true"></span>
+        </a>
+        <select id="interface-language" data-i18n-label="language" aria-label="Язык интерфейса">
+          <option value="ru" lang="ru">RU</option>
+          <option value="en" lang="en">EN</option>
+        </select>
+      </div>
+    </nav>
+  </header>
+  <main class="app">
+    <header class="intro">
+      <h1 data-i18n="heading">Снимок терминала</h1>
+      <p data-i18n="intro">Соберите кадр для поста или презентации.</p>
+    </header>
+
+    <div class="workspace">
+      <section class="panel preview" aria-labelledby="preview-title">
+        <div class="preview-header">
+          <h2 id="preview-title" data-i18n="preview">Предпросмотр</h2>
+          <div class="preview-tools">
+            <button id="add-exchange" class="exchange-button" type="button" data-i18n="add">Добавить ввод и вывод</button>
+            <button id="remove-exchange" class="exchange-button" type="button" data-i18n="remove" disabled>Удалить последнюю пару</button>
+          </div>
+        </div>
+        <div class="preview-stage">
+          <div class="terminal-window" id="terminal-window">
+            <canvas id="terminal" role="img" data-i18n-label="previewImage" aria-label="Предпросмотр снимка терминала"></canvas>
+            <canvas id="editing-overlay" aria-hidden="true"></canvas>
+            <input class="terminal-field" id="window-title" type="text" value="terminal"
+              data-i18n-label="windowTitle" data-i18n-title="editWindowTitle" data-i18n-placeholder="windowTitle"
+              aria-label="Заголовок окна" title="Изменить заголовок окна" placeholder="Заголовок окна" spellcheck="false">
+            <textarea class="terminal-field" id="command" aria-label="Ввод 1"
+              title="Редактировать ввод" placeholder="Ввод" spellcheck="false">python report.py</textarea>
+            <textarea class="terminal-field" id="output" aria-label="Вывод 1"
+              title="Редактировать вывод" placeholder="Вывод" spellcheck="false">Reading data… OK
+Records processed: 128
+Report saved to report.csv</textarea>
+          </div>
+        </div>
+        <p class="notice" data-i18n="editHint">Нажмите на заголовок, команду или область вывода, чтобы редактировать их в окне.</p>
+        <p id="overflow" class="notice" role="status" hidden></p>
+        <div class="actions">
+          <button id="download" type="button" data-i18n="download">Скачать PNG</button>
+          <button id="copy" type="button" data-i18n="copy">Копировать PNG</button>
+          <output id="size" data-i18n-label="pngSize" aria-label="Размер PNG"></output>
+        </div>
+        <p id="status" class="notice" role="status"></p>
+      </section>
+
+      <form class="panel editor" id="editor" aria-labelledby="settings-title">
+        <h2 id="settings-title" data-i18n="settings">Настройки</h2>
+        <div class="theme-setting">
+          <label for="terminal-theme" data-i18n="theme">Стиль терминала</label>
+          <select id="terminal-theme">
+            <option value="matrix">Matrix</option>
+            <option value="windows">Windows 95</option>
+            <option value="mac-dark" data-i18n="macDark">macOS — тёмный</option>
+            <option value="mac-light" data-i18n="macLight">macOS — светлый</option>
+            <option value="kde-dark">KDE Konsole</option>
+            <option value="gnome-dark">GNOME Terminal</option>
+          </select>
+        </div>
+        <fieldset>
+          <legend data-i18n="dimensions">Размер в символах</legend>
+          <div class="dimensions">
+            <label><span data-i18n="columns">Колонки</span> <input id="columns" type="number" min="12" max="160" value="56" required></label>
+            <label><span data-i18n="rows">Строки</span> <input id="rows" type="number" min="1" max="80" value="12" required></label>
+          </div>
+        </fieldset>
+
+        <div class="toggles">
+          <label><input id="prompt" type="checkbox" checked> <span data-i18n="prompt">Приглашение ввода</span></label>
+          <fieldset class="cursor-options">
+            <legend data-i18n="cursor">Курсор</legend>
+            <label><input type="radio" name="cursor" value="line" checked> <span data-i18n="cursorLine">На новой строке</span></label>
+            <label><input type="radio" name="cursor" value="end"> <span data-i18n="cursorEnd">Сразу после текста</span></label>
+            <label><input type="radio" name="cursor" value="hidden"> <span data-i18n="cursorHidden">Скрыт</span></label>
+          </fieldset>
+        </div>
+      </form>
+    </div>
+  </main>
+</body>
+</html>
