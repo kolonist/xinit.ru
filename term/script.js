@@ -2,6 +2,7 @@
 
 const editor = document.querySelector("#editor");
 const themeSelect = document.querySelector("#terminal-theme");
+const themeSwatch = document.querySelector("#theme-swatch");
 const languageSelect = document.querySelector("#interface-language");
 const terminalWindow = document.querySelector("#terminal-window");
 const windowTitle = document.querySelector("#window-title");
@@ -85,9 +86,15 @@ let preferredLanguage;
 let dragSelection;
 let caretBlinkTimer;
 let caretVisible = true;
+let copyFeedbackTimer;
 
 function translate(key) {
   return terminalTranslations[key][languageSelect.value === "ru" ? 0 : 1];
+}
+
+function showStatus(key, announcementOnly = false) {
+  status.classList.toggle("copy-announcement", announcementOnly);
+  status.textContent = key ? translate(key) : "";
 }
 
 function labelExchange({ command, output }, number) {
@@ -444,20 +451,24 @@ function emptyOutputToExpand(field = document.activeElement) {
 }
 
 function render({ expandedOutput = emptyOutputToExpand() } = {}) {
+  const theme = themes[themeSelect.value];
+  themeSwatch.style.setProperty("--swatch-header", theme.header);
+  themeSwatch.style.setProperty("--swatch-body", theme.background);
+  themeSwatch.style.setProperty("--swatch-ink", theme.command);
+
   if (!columns.validity.valid || !rows.validity.valid) {
     download.disabled = true;
     copy.disabled = true;
-    status.textContent = translate("invalidSize");
+    showStatus("invalidSize");
     return;
   }
 
   download.disabled = false;
   copy.disabled = false;
-  status.textContent = "";
+  showStatus();
 
   const columnCount = columns.valueAsNumber;
   const rowCount = rows.valueAsNumber;
-  const theme = themes[themeSelect.value];
   context.font = font;
   const cellWidth = Math.ceil(context.measureText("M").width);
   const width = padding * 2 + columnCount * cellWidth;
@@ -668,7 +679,7 @@ addExchange.addEventListener("click", () => {
     if (!line.editableOnly) neededRows += 1;
     if (neededRows > Number(rows.max)) {
       exchanges.pop();
-      status.textContent = translate("noRoom");
+      showStatus("noRoom");
       return;
     }
   }
@@ -766,24 +777,29 @@ download.addEventListener("click", async () => {
     link.download = "terminal.png";
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    status.textContent = translate("downloadReady");
+    showStatus("downloadReady");
   } catch {
-    status.textContent = translate("downloadError");
+    showStatus("downloadError");
   }
 });
 
 copy.addEventListener("click", async () => {
+  clearTimeout(copyFeedbackTimer);
+  delete copy.dataset.copied;
   if (!navigator.clipboard?.write || !window.ClipboardItem) {
-    status.textContent = translate("clipboardUnavailable");
+    showStatus("clipboardUnavailable");
     return;
   }
 
   try {
     const item = new ClipboardItem({ "image/png": makePng() });
     await navigator.clipboard.write([item]);
-    status.textContent = translate("copied");
+    copy.dataset.copied = "";
+    showStatus("copied", true);
+    clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = setTimeout(() => { delete copy.dataset.copied; }, 2000);
   } catch {
-    status.textContent = translate("copyError");
+    showStatus("copyError");
   }
 });
 

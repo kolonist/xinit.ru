@@ -7,7 +7,7 @@
   <title>Снимок терминала · xinit.ru</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Roboto:wdth,wght@80,300&display=swap">
   <link rel="stylesheet" href="styles.css">
   <script src="localization.js" defer></script>
   <script src="script.js" defer></script>
@@ -62,25 +62,39 @@ Report saved to report.csv</textarea>
         <p class="notice" data-i18n="editHint">Нажмите на заголовок, команду или область вывода, чтобы редактировать их в окне.</p>
         <p id="overflow" class="notice" role="status" hidden></p>
         <div class="actions">
-          <button id="download" type="button" data-i18n="download">Скачать PNG</button>
-          <button id="copy" type="button" data-i18n="copy">Копировать PNG</button>
-          <output id="size" data-i18n-label="pngSize" aria-label="Размер PNG"></output>
+          <div class="export-buttons">
+            <button id="download" type="button">
+              <span class="export-icon download-icon" aria-hidden="true"></span>
+              <span data-i18n="download">Скачать PNG</span>
+            </button>
+            <button id="copy" type="button" data-i18n-label="copy" aria-label="Копировать PNG">
+              <span class="export-icon copy-icon" aria-hidden="true"></span>
+              <span class="copy-label" data-i18n="copy">Копировать PNG</span>
+              <span class="copy-confirmation" data-i18n="copiedButton" aria-hidden="true">Скопировано ✓</span>
+            </button>
+          </div>
+          <div class="export-details">
+            <output id="size" data-i18n-label="pngSize" aria-label="Размер PNG"></output>
+            <p id="status" role="status"></p>
+          </div>
         </div>
-        <p id="status" class="notice" role="status"></p>
       </section>
 
       <form class="panel editor" id="editor" aria-labelledby="settings-title">
         <h2 id="settings-title" data-i18n="settings">Настройки</h2>
         <div class="theme-setting">
           <label for="terminal-theme" data-i18n="theme">Стиль терминала</label>
-          <select id="terminal-theme">
-            <option value="matrix">Matrix</option>
-            <option value="windows">Windows 95</option>
-            <option value="mac-dark" data-i18n="macDark">macOS — тёмный</option>
-            <option value="mac-light" data-i18n="macLight">macOS — светлый</option>
-            <option value="kde-dark">KDE Konsole</option>
-            <option value="gnome-dark">GNOME Terminal</option>
-          </select>
+          <div class="theme-picker">
+            <span id="theme-swatch" aria-hidden="true"></span>
+            <select id="terminal-theme">
+              <option value="matrix">Matrix</option>
+              <option value="windows">Windows 95</option>
+              <option value="mac-dark" data-i18n="macDark">macOS — тёмный</option>
+              <option value="mac-light" data-i18n="macLight">macOS — светлый</option>
+              <option value="kde-dark">KDE Konsole</option>
+              <option value="gnome-dark">GNOME Terminal</option>
+            </select>
+          </div>
         </div>
         <fieldset>
           <legend data-i18n="dimensions">Размер в символах</legend>

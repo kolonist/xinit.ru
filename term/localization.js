@@ -21,6 +21,7 @@ const terminalTranslations = {
   ],
   download: ["Скачать PNG", "Download PNG"],
   copy: ["Копировать PNG", "Copy PNG"],
+  copiedButton: ["Скопировано ✓", "Copied ✓"],
   pngSize: ["Размер PNG", "PNG dimensions"],
   settings: ["Настройки", "Settings"],
   theme: ["Стиль терминала", "Terminal style"],
