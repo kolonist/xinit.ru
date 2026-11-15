@@ -3,6 +3,7 @@
   font-family: "IBM Plex Mono", monospace;
   color: #def2ff;
   background: #030913;
+  scrollbar-color: #527f9c #030913;
   --panel: rgba(5, 19, 35, 0.86);
   --border: #28506a;
   --rule: rgba(105, 192, 239, 0.2);
