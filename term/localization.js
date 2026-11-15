@@ -1,10 +1,8 @@
 "use strict";
 
 const terminalTranslations = {
-  navigation: ["Навигация", "Navigation"],
+  ...siteTranslations,
   home: ["На главную", "Home"],
-  telegram: ["Telegram-канал Lofi Developer", "Lofi Developer Telegram channel"],
-  language: ["Язык интерфейса", "Interface language"],
   heading: ["Снимок терминала", "Terminal Screenshot"],
   intro: ["Соберите кадр для поста или презентации.", "Create a terminal screenshot for a post or presentation."],
   preview: ["Предпросмотр", "Preview"],

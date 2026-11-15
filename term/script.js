@@ -78,11 +78,17 @@ const themes = {
     caret: "#ffffff", selection: "rgba(120, 174, 237, 0.35)", prompt: "$ ",
     desktopChrome: "gnome", cornerRadius: 12,
   },
+  xinit: {
+    background: "#050e1b", header: "#0b2139", title: "#99b7cf", divider: "#28506a",
+    border: "#28506a", buttons: ["#ffbe79", "#99b7cf", "#28506a"],
+    command: "#def2ff", output: "#99b7cf", focus: "#9ceaff", caret: "#9ceaff",
+    selection: "rgba(156, 234, 255, 0.28)", prompt: "$ ", accent: "#9ceaff",
+    cornerRadius: 7, centeredTitleInset: 44,
+    buttonLayout: { start: 14, spacing: 10, radius: 3 },
+  },
 };
 const editRows = new Map();
-const settingsKey = "xinit-terminal-settings-v1";
 const lastValidDimensions = { columns: columns.valueAsNumber, rows: rows.valueAsNumber };
-let preferredLanguage;
 let dragSelection;
 let reservedOutput = null;
 let caretBlinkTimer;
@@ -107,29 +113,20 @@ function labelExchange({ command, output }, number) {
   }
 }
 
-function applyLanguage() {
-  document.documentElement.lang = languageSelect.value;
+function applyLanguage(language) {
+  localizePage(terminalTranslations, language);
   document.title = translate("heading") + " · xinit.ru";
-  for (const element of document.querySelectorAll("[data-i18n]")) {
-    element.textContent = translate(element.dataset.i18n);
-  }
-  for (const [key, attribute] of [["label", "aria-label"], ["title", "title"], ["placeholder", "placeholder"]]) {
-    for (const element of document.querySelectorAll("[data-i18n-" + key + "]")) {
-      element.setAttribute(attribute, translate(element.getAttribute("data-i18n-" + key)));
-    }
-  }
   exchanges.forEach((exchange, index) => labelExchange(exchange, index + 1));
 }
 
 function restoreSettings() {
   try {
-    const settings = JSON.parse(localStorage.getItem(settingsKey)) ?? {};
+    const settings = JSON.parse(localStorage.getItem(terminalSettingsKey)) ?? {};
     if (typeof settings.theme === "string" && Object.hasOwn(themes, settings.theme)) {
       themeSelect.value = settings.theme;
     }
     if (typeof settings.prompt === "boolean") prompt.checked = settings.prompt;
     if (typeof settings.title === "string") windowTitle.value = settings.title;
-    if (["ru", "en"].includes(settings.language)) preferredLanguage = settings.language;
     if (["line", "end", "hidden"].includes(settings.cursor)) cursor.value = settings.cursor;
 
     for (const input of [columns, rows]) {
@@ -150,13 +147,12 @@ function saveSettings() {
   }
 
   try {
-    localStorage.setItem(settingsKey, JSON.stringify({
+    localStorage.setItem(terminalSettingsKey, JSON.stringify({
       theme: themeSelect.value,
       ...lastValidDimensions,
       prompt: prompt.checked,
       cursor: cursor.value,
       title: windowTitle.value,
-      language: preferredLanguage,
     }));
   } catch {
     // The editor still works when storage is blocked or full.
@@ -189,7 +185,7 @@ function* terminalLines() {
   }
 
   if (cursor.value === "line" || (cursor.value === "end" && !lastTextSection)) {
-    yield { text: prefix, color: theme.command, cursor: true };
+    yield { text: prefix, offset: -prefix.length, color: theme.command, cursor: true };
   }
 }
 
@@ -353,10 +349,13 @@ function drawWindow(width, height, theme) {
         context.fillText(symbol, 16 + index * 13, y);
       }
     } else {
+      const buttons = theme.buttonLayout ?? (radius
+        ? { start: 18, spacing: 17, radius: 6 }
+        : { start: 16, spacing: 13, radius: 3.5 });
       for (const [index, color] of theme.buttons.entries()) {
         context.beginPath();
-        const x = radius ? 18 + index * 17 : 16 + index * 13;
-        context.arc(x, titleHeight / 2, radius ? 6 : 3.5, 0, Math.PI * 2);
+        const x = buttons.start + index * buttons.spacing;
+        context.arc(x, titleHeight / 2, buttons.radius, 0, Math.PI * 2);
         context.fillStyle = color;
         context.fill();
       }
@@ -417,7 +416,8 @@ function positionField(field, width, height, left, right, top, bottom) {
 
 function titleLayout(theme) {
   if (theme.windowsChrome) return { left: windowsTitleStart, right: windowsTitleEnd, align: "left" };
-  if (theme.desktopChrome) return { left: desktopTitleInset, right: desktopTitleInset, align: "center" };
+  const centeredInset = theme.centeredTitleInset ?? (theme.desktopChrome ? desktopTitleInset : 0);
+  if (centeredInset) return { left: centeredInset, right: centeredInset, align: "center" };
   return { left: theme.cornerRadius ? macTitleStart : titleStart, right: padding, align: "right" };
 }
 
@@ -511,12 +511,13 @@ function render({ expandedOutput = emptyOutputToExpand() } = {}) {
       continue;
     }
     row += 1;
-    context.fillStyle = color;
+    context.fillStyle = offsets[0] < 0 ? theme.accent ?? color : color;
     cells.forEach((cell, column) => {
+      if (offsets[column] === 0) context.fillStyle = color;
       context.fillText(cell, padding + column * cellWidth, y, cellWidth);
     });
     if (showCursor) {
-      context.fillStyle = theme.command;
+      context.fillStyle = theme.accent ?? theme.command;
       if (theme.glow) {
         context.shadowColor = theme.glow;
         context.shadowBlur = 7;
@@ -698,12 +699,6 @@ removeExchange.addEventListener("click", () => {
 });
 
 editor.addEventListener("submit", event => event.preventDefault());
-languageSelect.addEventListener("change", () => {
-  preferredLanguage = languageSelect.value;
-  applyLanguage();
-  saveSettings();
-  render();
-});
 editor.addEventListener("input", () => {
   saveSettings();
   render();
@@ -799,7 +794,8 @@ copy.addEventListener("click", async () => {
 });
 
 restoreSettings();
-languageSelect.value = preferredLanguage ?? (navigator.language.toLowerCase().split("-")[0] === "ru" ? "ru" : "en");
-applyLanguage();
-render();
+initSiteLanguage(languageSelect, language => {
+  applyLanguage(language);
+  render();
+});
 document.fonts.ready.then(render);

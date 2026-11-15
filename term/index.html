@@ -5,17 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#09121b">
   <title>Снимок терминала · xinit.ru</title>
+  <link rel="icon" href="../favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="../icons/favicon-16x16.png" type="image/png" sizes="16x16">
+  <link rel="icon" href="../icons/favicon-32x32.png" type="image/png" sizes="32x32">
+  <link rel="icon" href="../icons/favicon-48x48.png" type="image/png" sizes="48x48">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Roboto:wdth,wght@80,300&display=swap">
+  <link rel="stylesheet" href="../styles.css">
   <link rel="stylesheet" href="styles.css">
-  <script src="localization.js" defer></script>
-  <script src="script.js" defer></script>
+  <script src="../site-language.js" defer></script>
+  <script src="../site-footer.js" defer></script>
+  <script src="localization.js?v=2" defer></script>
+  <script src="script.js?v=3" defer></script>
 </head>
 <body>
   <header class="site-bar">
     <nav class="top-menu" data-i18n-label="navigation" aria-label="Навигация">
-      <a class="home-link" href="/"><span aria-hidden="true">←</span> <span class="home-label" data-i18n="home">На главную</span></a>
+      <a class="site-nav-link" href="/"><span aria-hidden="true">←</span> <span data-i18n="home">На главную</span></a>
       <div class="top-menu-tools">
         <a class="telegram-link" href="https://t.me/lofi_dev"
           data-i18n-label="telegram" data-i18n-title="telegram"
@@ -40,8 +47,8 @@
         <div class="preview-header">
           <h2 id="preview-title" data-i18n="preview">Предпросмотр</h2>
           <div class="preview-tools">
-            <button id="add-exchange" class="exchange-button" type="button" data-i18n="add">Добавить ввод и вывод</button>
-            <button id="remove-exchange" class="exchange-button" type="button" data-i18n="remove" disabled>Удалить последнюю пару</button>
+            <button id="add-exchange" class="action-button" type="button" data-i18n="add">Добавить ввод и вывод</button>
+            <button id="remove-exchange" class="action-button" type="button" data-i18n="remove" disabled>Удалить последнюю пару</button>
           </div>
         </div>
         <div class="preview-stage">
@@ -55,7 +62,7 @@
               title="Редактировать ввод" placeholder="Ввод" spellcheck="false">python report.py</textarea>
             <textarea class="terminal-field" id="output" aria-label="Вывод 1"
               title="Редактировать вывод" placeholder="Вывод" spellcheck="false">Reading data… OK
-Records processed: 128
+Records processed: 42
 Report saved to report.csv</textarea>
           </div>
         </div>
@@ -63,11 +70,11 @@ Report saved to report.csv</textarea>
         <p id="overflow" class="notice" role="status" hidden></p>
         <div class="actions">
           <div class="export-buttons">
-            <button id="download" type="button">
+            <button id="download" class="action-button" type="button">
               <span class="export-icon download-icon" aria-hidden="true"></span>
               <span data-i18n="download">Скачать PNG</span>
             </button>
-            <button id="copy" type="button" data-i18n-label="copy" aria-label="Копировать PNG">
+            <button id="copy" class="action-button" type="button" data-i18n-label="copy" aria-label="Копировать PNG">
               <span class="export-icon copy-icon" aria-hidden="true"></span>
               <span class="copy-label" data-i18n="copy">Копировать PNG</span>
               <span class="copy-confirmation" data-i18n="copiedButton" aria-hidden="true">Скопировано ✓</span>
@@ -87,6 +94,7 @@ Report saved to report.csv</textarea>
           <div class="theme-picker">
             <span id="theme-swatch" aria-hidden="true"></span>
             <select id="terminal-theme">
+              <option value="xinit" selected>xinit</option>
               <option value="matrix">Matrix</option>
               <option value="windows">Windows 95</option>
               <option value="mac-dark" data-i18n="macDark">macOS — тёмный</option>
@@ -116,5 +124,10 @@ Report saved to report.csv</textarea>
       </form>
     </div>
   </main>
+  <footer class="site-footer">
+    <div class="site-footer-content">
+      <span>© <span data-current-year>2026</span> Digital Partizan</span>
+    </div>
+  </footer>
 </body>
 </html>
