@@ -84,6 +84,7 @@ const settingsKey = "xinit-terminal-settings-v1";
 const lastValidDimensions = { columns: columns.valueAsNumber, rows: rows.valueAsNumber };
 let preferredLanguage;
 let dragSelection;
+let reservedOutput = null;
 let caretBlinkTimer;
 let caretVisible = true;
 let copyFeedbackTimer;
@@ -456,64 +457,57 @@ function render({ expandedOutput = emptyOutputToExpand() } = {}) {
   themeSwatch.style.setProperty("--swatch-body", theme.background);
   themeSwatch.style.setProperty("--swatch-ink", theme.command);
 
-  if (!columns.validity.valid || !rows.validity.valid) {
-    download.disabled = true;
-    copy.disabled = true;
-    showStatus("invalidSize");
-    return;
-  }
+  const validSize = columns.validity.valid && rows.validity.valid;
+  download.disabled = !validSize;
+  copy.disabled = !validSize;
+  showStatus(validSize ? null : "invalidSize");
 
-  download.disabled = false;
-  copy.disabled = false;
-  showStatus();
-
-  const columnCount = columns.valueAsNumber;
-  const rowCount = rows.valueAsNumber;
+  const columnCount = columns.validity.valid ? columns.valueAsNumber : lastValidDimensions.columns;
+  const rowCount = rows.validity.valid ? rows.valueAsNumber : lastValidDimensions.rows;
   context.font = font;
   const cellWidth = Math.ceil(context.measureText("M").width);
   const width = padding * 2 + columnCount * cellWidth;
   const height = titleHeight + padding * 2 + rowCount * lineHeight;
 
-  canvas.width = width * pixelScale;
-  canvas.height = height * pixelScale;
-  editingOverlay.width = canvas.width;
-  editingOverlay.height = canvas.height;
+  const pixelWidth = width * pixelScale;
+  const pixelHeight = height * pixelScale;
+  for (const surface of [canvas, editingOverlay]) {
+    if (surface.width !== pixelWidth) surface.width = pixelWidth;
+    if (surface.height !== pixelHeight) surface.height = pixelHeight;
+  }
   const fields = exchanges.flatMap(({ command, output }) => [command, output]);
   editRows.clear();
   for (const field of [windowTitle, ...fields]) editRows.set(field, []);
   terminalWindow.style.width = width + "px";
+  terminalWindow.style.setProperty("--readable-width", width * 0.75 + "px");
   terminalWindow.style.setProperty("--terminal-focus", theme.focus);
   const radius = theme.cornerRadius ?? 0;
   terminalWindow.style.borderRadius = radius / width * 100 + "% / " + radius / height * 100 + "%";
-  context.scale(pixelScale, pixelScale);
+  context.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+  context.clearRect(0, 0, width, height);
   drawWindow(width, height, theme);
+
+  const lines = [];
+  let contentRows = 0;
+  for (const line of wrapLines(terminalLines(), columnCount)) {
+    if (!line.editableOnly && ++contentRows > rowCount) break;
+    lines.push(line);
+  }
+  // Expand the empty editor only if it fits alongside all the rows in the PNG.
+  reservedOutput = contentRows < rowCount ? expandedOutput : null;
 
   context.font = font;
   let row = 0;
-  let reservedRows = 0;
-  let clipped = false;
-  for (const { cells, field, color, offsets, editableOnly, cursor: showCursor }
-    of wrapLines(terminalLines(), columnCount)) {
-    if (row >= rowCount && !editableOnly) {
-      if (row - reservedRows >= rowCount) {
-        clipped = true;
-        break;
-      }
-      row += 1;
-      continue;
-    }
+  for (const { cells, field, color, offsets, editableOnly, cursor: showCursor } of lines) {
     const rowY = titleHeight + padding + row * lineHeight + lineHeight / 2;
     const y = editableOnly ? Math.min(rowY, height - padding / 2) : rowY;
     if (field) {
       const stops = offsets.flatMap((offset, column) =>
         offset < 0 ? [] : [{ offset, x: padding + column * cellWidth }]);
-      editRows.get(field).push({ y, stops, collapsed: editableOnly && field !== expandedOutput });
+      editRows.get(field).push({ y, stops, collapsed: editableOnly && field !== reservedOutput });
     }
     if (editableOnly) {
-      if (field === expandedOutput && row < rowCount) {
-        row += 1;
-        reservedRows += 1;
-      }
+      if (field === reservedOutput) row += 1;
       continue;
     }
     row += 1;
@@ -541,7 +535,7 @@ function render({ expandedOutput = emptyOutputToExpand() } = {}) {
   }
 
   size.textContent = canvas.width + " × " + canvas.height + " px";
-  overflow.hidden = !clipped;
+  overflow.hidden = contentRows <= rowCount;
   overflow.textContent = overflow.hidden ? "" : translate("overflow");
   drawEditingOverlay();
 }
@@ -569,7 +563,7 @@ function drawEditingOverlay() {
 
   const emptyOutput = emptyOutputToExpand(field);
   const outputRow = editRows.get(emptyOutput)?.[0];
-  if (emptyOutput !== field && outputRow) {
+  if (emptyOutput !== field && outputRow && !outputRow.collapsed) {
     editingContext.font = '12px "IBM Plex Mono", monospace';
     editingContext.textBaseline = "middle";
     editingContext.fillStyle = theme.output;
@@ -635,15 +629,14 @@ function offsetAtPointer(field, event) {
     Math.abs(candidate.x - x) < Math.abs(nearest.x - x) ? candidate : nearest).offset;
 }
 
-function selectToPointer(field, anchor, event) {
-  const offset = offsetAtPointer(field, event);
+function selectOffsets(field, anchor, offset) {
   field.setSelectionRange(Math.min(anchor, offset), Math.max(anchor, offset),
     offset < anchor ? "backward" : "forward");
   restartCaretBlink();
 }
 
 function makePng() {
-  const restoreEditingRow = emptyOutputToExpand();
+  const restoreEditingRow = reservedOutput !== null;
   if (restoreEditingRow) render({ expandedOutput: null });
   return new Promise((resolve, reject) => {
     try {
@@ -738,19 +731,21 @@ terminalWindow.addEventListener("pointerdown", event => {
   if (!editRows.has(field) || event.pointerType !== "mouse" || event.button !== 0) return;
   event.preventDefault();
 
+  const offset = offsetAtPointer(field, event);
   const extend = event.shiftKey && document.activeElement === field;
   const anchor = extend
     ? (field.selectionDirection === "backward" ? field.selectionEnd : field.selectionStart)
-    : offsetAtPointer(field, event);
+    : offset;
   field.focus({ preventScroll: true });
   field.setPointerCapture(event.pointerId);
   dragSelection = { field, anchor, pointerId: event.pointerId };
-  selectToPointer(field, anchor, event);
+  selectOffsets(field, anchor, offset);
 });
 
 terminalWindow.addEventListener("pointermove", event => {
   if (dragSelection?.pointerId !== event.pointerId) return;
-  selectToPointer(dragSelection.field, dragSelection.anchor, event);
+  const { field, anchor } = dragSelection;
+  selectOffsets(field, anchor, offsetAtPointer(field, event));
 });
 
 terminalWindow.addEventListener("lostpointercapture", () => { dragSelection = undefined; });

@@ -284,7 +284,7 @@ canvas { display: block; width: 100%; height: auto; }
   -webkit-text-fill-color: transparent;
   caret-color: transparent;
   font: inherit;
-  font-size: 0.875rem;
+  font-size: 1rem;
   line-height: 1.4;
   resize: none;
   overflow: hidden;
@@ -384,4 +384,11 @@ button:not(:disabled):hover { filter: brightness(1.16); }
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "preview" "settings";
   }
+
+  .preview-stage {
+    justify-items: safe center;
+    overflow-x: auto;
+  }
+
+  .terminal-window { min-width: var(--readable-width, 0px); }
 }
