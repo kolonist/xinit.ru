@@ -23,8 +23,6 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   background:
-    radial-gradient(ellipse at 81% 32%, transparent 0 43%, #36b7ff24 43.05% 43.13%, transparent 43.2% 51%, #36b7ff14 51.05% 51.12%, transparent 51.2%),
-    linear-gradient(118deg, transparent 64%, #328bd412 64.02%, transparent 64.12%),
     radial-gradient(circle, #6acaff2b 0.6px, transparent 0.9px) 0 0 / 32px 32px,
     linear-gradient(90deg, #428acb08 1px, transparent 1px) 50% 0 / 160px 160px,
     linear-gradient(#428acb08 1px, transparent 1px) 0 0 / 160px 160px,
