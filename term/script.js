@@ -90,7 +90,7 @@ const themes = {
 const editRows = new Map();
 const lastValidDimensions = { columns: columns.valueAsNumber, rows: rows.valueAsNumber };
 let dragSelection;
-let reservedOutput = null;
+let reservedField = null;
 let caretBlinkTimer;
 let caretVisible = true;
 let copyFeedbackTimer;
@@ -159,33 +159,43 @@ function saveSettings() {
   }
 }
 
-function* terminalLines() {
+function* terminalLines({ expandedField = null, cursorOutput = null } = {}) {
   const theme = themes[themeSelect.value];
   const prefix = prompt.checked ? theme.prompt : "";
+  const cursorMode = cursor.value;
   const sections = [];
+  const emptyTerminal = exchanges.length === 1 && !exchanges[0].command.value && !exchanges[0].output.value;
+  const previewCursorOnNewLine = emptyTerminal && cursorMode === "line" && expandedField !== null;
+  const cursorOnEmptyCommand = emptyTerminal && cursorMode !== "hidden" && !previewCursorOnNewLine &&
+    cursorOutput === null;
 
   for (const { command, output } of exchanges) {
-    const commandText = command.value || exchanges.length > 1 || (!output.value && cursor.value === "hidden")
-      ? prefix + command.value : "";
+    const showCommand = Boolean(command.value) || !output.value;
+    const commandText = showCommand || command === expandedField ? prefix + command.value : "";
     sections.push({ field: command, text: commandText, offset: commandText ? -prefix.length : 0,
-      color: theme.command, editableOnly: !commandText && exchanges.length === 1 });
+      color: theme.command, editableOnly: !showCommand });
     sections.push({ field: output, text: output.value, offset: 0, color: theme.output,
       editableOnly: !output.value });
   }
 
-  const lastTextSection = sections.findLast(section => section.text);
+  // A focused empty output can show where its first character would go.
+  const lastCursorSection = sections.findLast(section =>
+    (!section.editableOnly && section.text) || section.field === cursorOutput);
   for (const section of sections) {
     const lines = section.text.split("\n");
     let offset = section.offset;
     for (const [index, text] of lines.entries()) {
-      const isLastLine = section === lastTextSection && index === lines.length - 1;
-      yield { ...section, text, offset, cursor: isLastLine && cursor.value === "end" };
+      const isLastLine = section === lastCursorSection && index === lines.length - 1;
+      const showCursor = cursorOnEmptyCommand ? section.field === exchanges[0].command
+        : isLastLine && cursorMode === "end";
+      yield { ...section, text, offset, cursor: showCursor };
       offset += text.length + 1;
     }
   }
 
-  if (cursor.value === "line" || (cursor.value === "end" && !lastTextSection)) {
-    yield { text: prefix, offset: -prefix.length, color: theme.command, cursor: true };
+  if (!cursorOnEmptyCommand && (cursorMode === "line" || (cursorMode === "end" && !lastCursorSection))) {
+    yield { text: prefix, offset: -prefix.length, color: theme.command, cursor: true,
+      previewOnly: previewCursorOnNewLine };
   }
 }
 
@@ -427,31 +437,40 @@ function positionFields(width, height, fields, theme) {
   const visibleFields = fields.filter(field => editRows.get(field).length > 0);
   for (const field of fields) field.hidden = editRows.get(field).length === 0;
 
-  let top = titleHeight + 1;
-  for (const [index, field] of visibleFields.entries()) {
-    const next = visibleFields[index + 1];
-    let bottom = height - 1;
-    if (next) {
-      const nextRow = editRows.get(next)[0];
-      bottom = nextRow.y - lineHeight / 2;
-      // Use the interline gap above the next command for its predecessor's empty output.
-      const following = visibleFields[index + 2];
-      if (nextRow.collapsed && following && editRows.get(following)[0].y === nextRow.y) {
-        bottom -= 5;
-      }
+  const fieldTops = visibleFields.map(field => {
+    const row = editRows.get(field)[0];
+    return row.y - row.height / 2;
+  });
+  // Give collapsed fields separate hit areas in the gap above the next row.
+  for (let index = visibleFields.length - 2; index >= 0; index -= 1) {
+    if (editRows.get(visibleFields[index])[0].collapsed) {
+      fieldTops[index] = Math.min(fieldTops[index], fieldTops[index + 1] - 5);
     }
+  }
+  for (const [index, field] of visibleFields.entries()) {
+    const top = index === 0 ? titleHeight + 1 : fieldTops[index];
+    const bottom = fieldTops[index + 1] ?? height - 1;
     positionField(field, width, height, 1, 1, top, bottom);
-    top = bottom;
   }
 }
 
-function emptyOutputToExpand(field = document.activeElement) {
-  const exchange = exchanges.find(({ command, output }) =>
-    output.value === "" && (field === command || field === output));
-  return exchange?.output ?? null;
+function exchangeForField(field) {
+  return exchanges.find(({ command, output }) => field === command || field === output);
 }
 
-function render({ expandedOutput = emptyOutputToExpand() } = {}) {
+function emptyOutputForEndCursor(field = document.activeElement) {
+  const output = exchangeForField(field)?.output;
+  return cursor.value === "end" && output && field === output && !output.value ? output : null;
+}
+
+function emptyFieldToExpand(field = document.activeElement) {
+  const exchange = exchangeForField(field);
+  if (!exchange) return null;
+  if (!exchange.output.value) return exchange.output;
+  return exchange.command.value ? null : exchange.command;
+}
+
+function render({ expandedField = emptyFieldToExpand(), cursorOutput = emptyOutputForEndCursor() } = {}) {
   const theme = themes[themeSelect.value];
   themeSwatch.style.setProperty("--swatch-header", theme.header);
   themeSwatch.style.setProperty("--swatch-body", theme.background);
@@ -489,40 +508,44 @@ function render({ expandedOutput = emptyOutputToExpand() } = {}) {
 
   const lines = [];
   let contentRows = 0;
-  for (const line of wrapLines(terminalLines(), columnCount)) {
-    if (!line.editableOnly && ++contentRows > rowCount) break;
+  for (const line of wrapLines(terminalLines({ expandedField, cursorOutput }), columnCount)) {
+    if (!line.editableOnly && ++contentRows > rowCount) {
+      if (line.previewOnly) contentRows -= 1;
+      break;
+    }
     lines.push(line);
   }
-  // Expand the empty editor only if it fits alongside all the rows in the PNG.
-  reservedOutput = contentRows < rowCount ? expandedOutput : null;
+  reservedField = lines.some(line => line.field === expandedField) ? expandedField : null;
+  // At full capacity, use part of the bottom padding for the temporary editor.
+  const editorHeight = contentRows < rowCount ? lineHeight : padding - 2;
 
   context.font = font;
-  let row = 0;
+  let rowTop = titleHeight + padding;
   for (const { cells, field, color, offsets, editableOnly, cursor: showCursor } of lines) {
-    const rowY = titleHeight + padding + row * lineHeight + lineHeight / 2;
+    const isExpandedField = field === reservedField;
+    const rowHeight = isExpandedField ? editorHeight : lineHeight;
+    const rowY = rowTop + rowHeight / 2;
     const y = editableOnly ? Math.min(rowY, height - padding / 2) : rowY;
     if (field) {
       const stops = offsets.flatMap((offset, column) =>
         offset < 0 ? [] : [{ offset, x: padding + column * cellWidth }]);
-      editRows.get(field).push({ y, stops, collapsed: editableOnly && field !== reservedOutput });
+      editRows.get(field).push({ y, height: rowHeight, stops, collapsed: editableOnly && !isExpandedField });
     }
-    if (editableOnly) {
-      if (field === reservedOutput) row += 1;
-      continue;
-    }
-    row += 1;
+    if (editableOnly && !isExpandedField) continue;
+    rowTop += rowHeight;
     context.fillStyle = offsets[0] < 0 ? theme.accent ?? color : color;
     cells.forEach((cell, column) => {
       if (offsets[column] === 0) context.fillStyle = color;
       context.fillText(cell, padding + column * cellWidth, y, cellWidth);
     });
     if (showCursor) {
+      const blockHeight = Math.min(16, rowHeight - 2);
       context.fillStyle = theme.accent ?? theme.command;
       if (theme.glow) {
         context.shadowColor = theme.glow;
         context.shadowBlur = 7;
       }
-      context.fillRect(padding + cells.length * cellWidth, y - 8, cellWidth - 1, 16);
+      context.fillRect(padding + cells.length * cellWidth, y - blockHeight / 2, cellWidth - 1, blockHeight);
       context.shadowBlur = 0;
     }
   }
@@ -562,21 +585,25 @@ function drawEditingOverlay() {
   if (!visibleRows?.length) return;
   const theme = themes[themeSelect.value];
 
-  const emptyOutput = emptyOutputToExpand(field);
-  const outputRow = editRows.get(emptyOutput)?.[0];
-  if (emptyOutput !== field && outputRow && !outputRow.collapsed) {
+  const exchange = exchangeForField(field);
+  const companion = exchange && (field === exchange.command ? exchange.output : exchange.command);
+  const companionRow = editRows.get(companion)?.[0];
+  if (companion?.value === "" && companionRow && !companionRow.collapsed) {
+    const isOutput = companion === exchange.output;
     editingContext.font = '12px "IBM Plex Mono", monospace';
     editingContext.textBaseline = "middle";
-    editingContext.fillStyle = theme.output;
+    editingContext.fillStyle = isOutput ? theme.output : theme.command;
     editingContext.save();
     editingContext.scale(pixelScale, pixelScale);
-    editingContext.fillText(translate("output"), padding, outputRow.y);
+    editingContext.fillText(translate(isOutput ? "output" : "input"), companionRow.stops[0].x, companionRow.y);
     editingContext.restore();
   }
 
   if (field !== windowTitle) {
-    const top = visibleRows[0].y - lineHeight / 2;
-    const bottom = Math.min(visibleRows.at(-1).y + lineHeight / 2, canvas.height / pixelScale - 1);
+    const firstRow = visibleRows[0];
+    const lastRow = visibleRows.at(-1);
+    const top = firstRow.y - firstRow.height / 2;
+    const bottom = Math.min(lastRow.y + lastRow.height / 2, canvas.height / pixelScale - 1);
     editingContext.strokeStyle = theme.focus;
     editingContext.lineWidth = pixelScale;
     editingContext.strokeRect(pixelScale, top * pixelScale,
@@ -585,7 +612,7 @@ function drawEditingOverlay() {
 
   const start = field.selectionStart;
   const end = field.selectionEnd;
-  const markHeight = field === windowTitle ? 14 : 18;
+  const markHeight = field === windowTitle ? 14 : Math.min(18, visibleRows[0].height - 2);
   if (start === end) {
     if (!caretVisible) return;
     const row = visibleRows.findLast(({ stops }) => start >= stops[0].offset);
@@ -637,8 +664,8 @@ function selectOffsets(field, anchor, offset) {
 }
 
 function makePng() {
-  const restoreEditingRow = reservedOutput !== null;
-  if (restoreEditingRow) render({ expandedOutput: null });
+  const restoreEditingRow = reservedField !== null;
+  if (restoreEditingRow) render({ expandedField: null, cursorOutput: null });
   return new Promise((resolve, reject) => {
     try {
       canvas.toBlob(blob => {
@@ -709,14 +736,18 @@ terminalWindow.addEventListener("input", event => {
   restartCaretBlink();
 });
 terminalWindow.addEventListener("focusin", event => {
-  const output = emptyOutputToExpand(event.target);
-  if (output && output !== emptyOutputToExpand(event.relatedTarget)) render({ expandedOutput: output });
+  const field = emptyFieldToExpand(event.target);
+  const cursorOutput = emptyOutputForEndCursor(event.target);
+  if ((field && field !== emptyFieldToExpand(event.relatedTarget)) ||
+      cursorOutput !== emptyOutputForEndCursor(event.relatedTarget)) {
+    render({ expandedField: field, cursorOutput });
+  }
   restartCaretBlink();
 });
 terminalWindow.addEventListener("focusout", event => {
   clearInterval(caretBlinkTimer);
-  const output = emptyOutputToExpand(event.target);
-  if (output && output !== emptyOutputToExpand(event.relatedTarget)) render({ expandedOutput: null });
+  const field = emptyFieldToExpand(event.target);
+  if (field && field !== emptyFieldToExpand(event.relatedTarget)) render({ expandedField: null, cursorOutput: null });
   editingContext.clearRect(0, 0, editingOverlay.width, editingOverlay.height);
 });
 document.addEventListener("selectionchange", restartCaretBlink);
