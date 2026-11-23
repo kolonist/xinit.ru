@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#061324">
+  <meta name="description" content="Простая рисовалка для схем, заметок и аннотаций.">
+  <title>x-paint · xinit.ru</title>
+  <link rel="icon" href="../favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="styles.css">
+  <script src="../site-language.js" defer></script>
+  <script src="localization.js" defer></script>
+  <script src="objects.js" defer></script>
+  <script src="highlighter.js" defer></script>
+  <script src="storage.js" defer></script>
+  <script src="export.js" defer></script>
+  <script src="script.js" defer></script>
+</head>
+<body class="paint-page">
+  <header class="site-bar">
+    <nav class="top-menu" data-i18n-label="navigation" aria-label="Навигация">
+      <a class="site-nav-link" href="/" data-i18n="home">На главную</a>
+      <div class="top-menu-tools">
+        <a class="telegram-link" href="https://t.me/lofi_dev"
+          data-i18n-label="telegram" data-i18n-title="telegram"
+          aria-label="Telegram-канал Lofi Developer" title="Telegram-канал Lofi Developer">
+          <span class="telegram-icon" aria-hidden="true"></span>
+        </a>
+        <select id="interface-language" data-i18n-label="language" aria-label="Язык интерфейса">
+          <option value="ru" lang="ru">RU</option>
+          <option value="en" lang="en">EN</option>
+        </select>
+      </div>
+    </nav>
+  </header>
+
+  <main class="paint-app" aria-labelledby="paint-title" inert>
+    <aside class="paint-sidebar" data-i18n-label="tools" aria-label="Инструменты">
+      <h1 id="paint-title">x-paint<span class="wordmark-cursor" aria-hidden="true"></span></h1>
+      <div id="drawing-tools" class="tool-grid" role="group" data-i18n-label="tools" aria-label="Инструменты"></div>
+      <fieldset class="palette">
+        <legend data-i18n="colors">Цвет</legend>
+        <div class="color-pair" id="color-pair"></div>
+      </fieldset>
+      <div class="stroke-tools"></div>
+    </aside>
+    <div class="control-group paint-popup palette-popup" id="palette-popup" role="group"
+      data-i18n-label="colors" aria-label="Цвет" hidden>
+      <div class="swatch-grid" id="palette"></div>
+      <div class="paint-slider fill-transparency" hidden>
+        <label for="fill-transparency" data-i18n="fillTransparency">Прозрачность</label>
+        <output id="fill-transparency-value" for="fill-transparency" aria-hidden="true">0%</output>
+        <input id="fill-transparency" type="range" min="0" max="100" value="0">
+      </div>
+      <button class="action-button" type="button" id="no-fill" data-i18n="noFill" hidden>Без заливки</button>
+    </div>
+    <div class="control-group paint-popup" id="stroke-popup" role="group"
+      data-i18n-label="strokeWidth" aria-label="Толщина" hidden>
+      <div class="paint-slider stroke-slider">
+        <label for="stroke-weight" data-i18n="strokeWeight">Линии и контуры</label>
+        <output for="stroke-weight" aria-hidden="true">3 px</output>
+        <input id="stroke-weight" type="range" min="1" max="32" value="3">
+        <span class="stroke-sample" aria-hidden="true"></span>
+      </div>
+      <div class="paint-slider stroke-slider">
+        <label for="marker-weight" data-i18n="markerWeight">Выделитель</label>
+        <output for="marker-weight" aria-hidden="true">16 px</output>
+        <input id="marker-weight" type="range" min="1" max="64" value="16">
+        <span class="stroke-sample" aria-hidden="true"></span>
+      </div>
+    </div>
+
+    <section class="preview-stage paint-stage" id="stage" data-i18n-label="canvas" aria-label="Область рисования">
+      <canvas id="drawing" tabindex="0" data-i18n-label="canvas" aria-label="Область рисования"
+        aria-describedby="tool-hint"></canvas>
+      <textarea id="text-content" rows="1" wrap="off" spellcheck="false" data-i18n-label="textContent"
+        aria-label="Текст на холсте" aria-describedby="tool-hint" hidden></textarea>
+      <div class="paint-controls">
+        <div class="control-group" id="actions" role="group" data-i18n-label="actions" aria-label="Действия"></div>
+        <div class="control-group export-options" id="export-options" role="group"
+          data-i18n-label="download" aria-label="Скачать PNG" hidden>
+          <button class="action-button" type="button" id="export-visible" data-i18n="downloadVisible">Видимая область</button>
+          <button class="action-button" type="button" id="export-all" data-i18n="downloadAll">Вся область</button>
+        </div>
+        <div class="control-group" id="selection-actions" role="group"
+          data-i18n-label="selectionActions" aria-label="Действия с выделением" hidden></div>
+        <div class="control-group" id="crop-actions" role="group"
+          data-i18n-label="cropActions" aria-label="Обрезка изображения" hidden></div>
+        <div class="control-group" id="text-actions" role="group"
+          data-i18n-label="textContent" aria-label="Текст на холсте" hidden></div>
+      </div>
+      <p class="canvas-hint" id="empty-hint" aria-hidden="true">
+        <span class="canvas-cross" aria-hidden="true"></span>
+        <span data-i18n="startDrawing">Начните рисовать</span>
+        <span data-i18n="dropHint">или перетащите сюда изображение</span>
+      </p>
+      <div class="paint-feedback">
+        <div class="paint-hints">
+          <p id="tool-hint"></p>
+          <p id="mouse-pan-hint" hidden>
+            <span class="paint-hint-divider" aria-hidden="true">·</span><span data-i18n="mousePanHint">Правая кнопка или колёсико + перетаскивание · прокрутка — зум</span>
+          </p>
+        </div>
+        <p id="status" role="status"></p>
+      </div>
+      <div class="control-group zoom-controls" id="zoom-tools" role="group" data-i18n-label="zoom" aria-label="Масштаб"></div>
+    </section>
+    <input type="file" id="image-file" accept="image/*" hidden>
+  </main>
+
+  <dialog class="panel" id="clear-dialog" aria-labelledby="clear-title">
+    <form method="dialog">
+      <h2 id="clear-title" data-i18n="clear">Очистить холст</h2>
+      <p data-i18n="clearPrompt">Удалить все объекты и их локальную копию?</p>
+      <div class="dialog-actions">
+        <button class="action-button" value="cancel" data-i18n="cancel" autofocus>Отмена</button>
+        <button class="action-button" value="clear" data-i18n="clear">Очистить холст</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

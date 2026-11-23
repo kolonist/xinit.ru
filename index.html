@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#061324">
-  <meta name="description" content="Инструменты в браузере. Оформите снимок терминала и сохраните его как PNG.">
+  <meta name="description" content="Инструменты в браузере. Оформите снимок терминала или нарисуйте схему.">
   <title data-i18n="pageTitle">Главная · xinit.ru</title>
   <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
   <link rel="icon" href="icons/favicon-16x16.png" type="image/png" sizes="16x16">
@@ -15,10 +15,10 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Roboto:wdth,wght@80,300&display=swap">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="home.css">
-  <script src="site-language.js" defer></script>
+  <script src="site-language.js?v=2" defer></script>
   <script src="site-footer.js" defer></script>
   <script src="site-navigation.js" defer></script>
-  <script src="home.js?v=4" defer></script>
+  <script src="home.js?v=7" defer></script>
 </head>
 <body>
   <header class="site-bar">
@@ -30,6 +30,7 @@
         </button>
         <ul class="site-menu" id="site-menu">
           <li><a class="site-nav-link" href="term/" data-i18n="terminalTitle">Снимок терминала</a></li>
+          <li><a class="site-nav-link" href="x-paint/">x-paint</a></li>
         </ul>
       </div>
       <div class="top-menu-tools">
@@ -51,7 +52,7 @@
       <h1 class="home-wordmark">
         <span class="home-wordmark-prompt" aria-hidden="true">&gt;</span>
         XINIT.RU
-        <span class="home-wordmark-cursor" aria-hidden="true"></span>
+        <span class="wordmark-cursor" aria-hidden="true"></span>
       </h1>
       <p data-i18n="intro">Небольшие утилиты для работы и публикаций.</p>
     </header>
@@ -86,6 +87,23 @@
           <span data-i18n="preview">Пример снимка</span>
           <span>PNG</span>
         </figcaption>
+      </figure>
+    </section>
+    <section class="panel home-feature home-paint" aria-labelledby="paint-title">
+      <div class="home-feature-copy">
+        <h2 id="paint-title">x-paint</h2>
+        <p class="home-feature-description" data-i18n="paintDescription">Рисуйте схемы и добавляйте пометки на изображения</p>
+        <a class="action-button" href="x-paint/">
+          <span data-i18n="openPaint">Открыть x-paint</span>
+          <span aria-hidden="true">→</span>
+        </a>
+      </div>
+      <figure class="home-preview">
+        <div class="preview-stage">
+          <img class="home-paint-image" src="x-paint/preview.webp" width="960" height="448"
+            alt="Схема со стрелками на холсте x-paint" data-i18n-alt="paintPreviewImage">
+        </div>
+        <figcaption class="home-preview-caption" data-i18n="paintPreview">Пример рисунка</figcaption>
       </figure>
     </section>
   </main>

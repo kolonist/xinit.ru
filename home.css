@@ -10,23 +10,6 @@
   text-shadow: none;
 }
 
-.home-wordmark-cursor {
-  align-self: end;
-  width: 0.34em;
-  height: 0.075em;
-  margin-bottom: 0.18em;
-  background: var(--signal);
-  animation: home-cursor-blink 1.5s step-end infinite;
-}
-
-@keyframes home-cursor-blink {
-  50% { opacity: 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .home-wordmark-cursor { animation: none; }
-}
-
 .home-feature {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -110,4 +93,16 @@
 
 @media (max-width: 40rem) {
   .home-feature { grid-template-columns: minmax(0, 1fr); }
+}
+
+.home-paint {
+  margin-top: 1rem;
+}
+
+.home-paint-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  box-shadow: 0 14px 28px #0007;
 }

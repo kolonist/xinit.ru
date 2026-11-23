@@ -117,6 +117,24 @@ body {
 #interface-language:hover { border-color: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+.wordmark-cursor {
+  flex: none;
+  align-self: end;
+  width: 0.34em;
+  height: 0.075em;
+  margin-bottom: 0.18em;
+  background: var(--signal);
+  animation: wordmark-cursor-blink 1.5s step-end infinite;
+}
+
+@keyframes wordmark-cursor-blink {
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wordmark-cursor { animation: none; }
+}
+
 .action-button {
   --action-background: #123752;
   display: inline-flex;
@@ -204,6 +222,16 @@ body {
 .panel::after { inset: auto -1px -1px auto; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
 
 .preview-stage {
+  --preview-grid-fine: #2183bc12;
+  --preview-grid-coarse: #3dacf61a;
+  --preview-grid-step: 20px;
+  --preview-grid-major-step: 100px;
+  --preview-center: #0d2d4d;
+  --preview-edge: #030d1d;
+  --preview-border: #214565;
+  --preview-corner: #8cdeff;
+  --preview-corner-inset: 5px;
+  --preview-corner-size: 0.9rem;
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -211,25 +239,34 @@ body {
   padding: clamp(0.6rem, 2.4vw, 1.9rem);
   min-height: 14rem;
   background:
-    linear-gradient(#2183bc12 1px, transparent 1px) center / 20px 20px,
-    linear-gradient(90deg, #2183bc12 1px, transparent 1px) center / 20px 20px,
-    linear-gradient(#3dacf61a 1px, transparent 1px) center / 100px 100px,
-    linear-gradient(90deg, #3dacf61a 1px, transparent 1px) center / 100px 100px,
-    radial-gradient(ellipse at 52% 46%, #0d2d4d, #030d1d 76%);
-  border: 1px solid #214565;
+    linear-gradient(var(--preview-grid-fine) 1px, transparent 1px) center / var(--preview-grid-step) var(--preview-grid-step),
+    linear-gradient(90deg, var(--preview-grid-fine) 1px, transparent 1px) center / var(--preview-grid-step) var(--preview-grid-step),
+    linear-gradient(var(--preview-grid-coarse) 1px, transparent 1px) center / var(--preview-grid-major-step) var(--preview-grid-major-step),
+    linear-gradient(90deg, var(--preview-grid-coarse) 1px, transparent 1px) center / var(--preview-grid-major-step) var(--preview-grid-major-step),
+    radial-gradient(ellipse at 52% 46%, var(--preview-center), var(--preview-edge) 76%);
+  border: 1px solid var(--preview-border);
   box-shadow: inset 0 0 38px #00050d99, 0 1px #8ddfff12;
 }
 
 .preview-stage::before, .preview-stage::after {
   content: "";
   position: absolute;
-  width: 0.9rem;
-  height: 0.9rem;
+  width: var(--preview-corner-size);
+  height: var(--preview-corner-size);
   pointer-events: none;
 }
 
-.preview-stage::before { inset: 5px auto auto 5px; border-top: 1px solid #8cdeff; border-left: 1px solid #8cdeff; }
-.preview-stage::after { inset: auto 5px 5px auto; border-bottom: 1px solid #8cdeff; border-right: 1px solid #8cdeff; }
+.preview-stage::before {
+  inset: var(--preview-corner-inset) auto auto var(--preview-corner-inset);
+  border-top: 1px solid var(--preview-corner);
+  border-left: 1px solid var(--preview-corner);
+}
+
+.preview-stage::after {
+  inset: auto var(--preview-corner-inset) var(--preview-corner-inset) auto;
+  border-bottom: 1px solid var(--preview-corner);
+  border-right: 1px solid var(--preview-corner);
+}
 
 .terminal-window { position: relative; max-width: 100%; overflow: hidden; box-shadow: 0 14px 28px rgba(0, 0, 0, 0.45); }
 
@@ -325,3 +362,28 @@ body {
     display: flex;
   }
 }
+
+.tool-button {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 2.35rem;
+  width: 2.35rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: #0b2139;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.tool-button svg { width: 1.15rem; height: 1.15rem; }
+.tool-button:not(:disabled):hover { border-color: var(--accent); background: #123752; }
+.tool-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: #14466a;
+  box-shadow: inset 0 -2px var(--electric);
+}
+.tool-button:disabled { opacity: 0.42; cursor: default; }

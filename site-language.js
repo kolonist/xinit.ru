@@ -55,7 +55,7 @@ function localizePage(translations, language) {
   for (const element of document.querySelectorAll("[data-i18n]")) {
     element.textContent = translations[element.dataset.i18n][index];
   }
-  for (const [key, attribute] of [["label", "aria-label"], ["title", "title"], ["placeholder", "placeholder"]]) {
+  for (const [key, attribute] of [["label", "aria-label"], ["title", "title"], ["placeholder", "placeholder"], ["alt", "alt"]]) {
     for (const element of document.querySelectorAll("[data-i18n-" + key + "]")) {
       element.setAttribute(attribute, translations[element.getAttribute("data-i18n-" + key)][index]);
     }
