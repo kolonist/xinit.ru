@@ -93,7 +93,10 @@ let markerPreview = null;
 let overlayVisible = false;
 let viewPreviewTimer;
 let viewSaveTimer;
+const objectClipboardType = "application/x-x-paint-objects";
+let localClipboardObjects = null;
 let localClipboardImage = null;
+let canvasPointer = null;
 let pngAction = null;
 
 function label(key) {
@@ -213,13 +216,13 @@ const undoButton = addButton(actions, "undo", undoEdit);
 const copyButton = addButton(actions, "copy", () => showExportOptions("copy"));
 addButton(actions, "paste", pasteImage);
 addButton(actions, "image", () => fileInput.click());
-toolButtons.set("laser", addButton(actions, "laser", () => setTool("laser")));
 const downloadButton = addButton(actions, "download", () => showExportOptions("download"));
 const exportTriggers = { copy: copyButton, download: downloadButton };
 for (const button of Object.values(exportTriggers)) {
   button.setAttribute("aria-controls", exportOptions.id);
   button.setAttribute("aria-expanded", "false");
 }
+toolButtons.set("laser", addButton(actions, "laser", () => setTool("laser")));
 const clearButton = addButton(actions, "clear", () => {
   clearDialog.returnValue = "";
   clearDialog.showModal();
@@ -500,11 +503,13 @@ function updateControls() {
     select: touchLayout.matches ? "marqueeHint" : "clickSelectionHint",
     text: "textHint",
     pan: touchLayout.matches ? "touchPanHint" : "panHint",
+    line: touchLayout.matches ? "touchDrawHint" : "segmentHint",
+    arrow: touchLayout.matches ? "touchDrawHint" : "segmentHint",
     rect: touchLayout.matches ? "touchDrawHint" : "shapeHint",
     circle: touchLayout.matches ? "touchDrawHint" : "shapeHint",
   };
   let hint = hints[activeTool] || (touchLayout.matches ? "touchDrawHint" : "drawHint");
-  if (selectedSegment()) hint = "endpointsHint";
+  if (selectedSegment()) hint = touchLayout.matches ? "endpointsHint" : "endpointsSnapHint";
   else if (selection.size) hint = touchLayout.matches ? "selectHint" : "resizeHint";
   if (crop) hint = "cropHint";
   if (textEdit) hint = "textEditHint";
@@ -849,10 +854,10 @@ function startEndpointDrag(point, additive) {
   const endDistance = distanceBetween(point, endHandle);
   const tolerance = (touchLayout.matches ? 16 : 10) / view.zoom;
   if (Math.min(startDistance, endDistance) > tolerance) return null;
+  const movingStart = startDistance <= endDistance;
   return {
     kind: "endpoint", object, original: { ...object }, start: point,
-    localStart: worldToObject(object, point),
-    movingStart: startDistance <= endDistance,
+    movingStart, handle: movingStart ? startHandle : endHandle, anchor: movingStart ? endHandle : startHandle,
     toggleObject: additive ? objectAt(point) : null,
   };
 }
@@ -861,24 +866,22 @@ function restoreEndpoint({ object, original: { x, y, end, path, arrowhead, bound
   Object.assign(object, { x, y, end, path, arrowhead, bounds });
 }
 
-function moveEndpoint(point) {
-  const { object, original, start, localStart, movingStart } = gesture;
+function moveEndpoint(point, constrained) {
+  const { object, original, start, handle, anchor, movingStart } = gesture;
   if (point.x === start.x && point.y === start.y) {
     restoreEndpoint(gesture);
     return;
   }
-  const local = worldToObject(original, point);
-  const dx = local.x - localStart.x;
-  const dy = local.y - localStart.y;
+  const target = { x: handle.x + (point.x - start.x), y: handle.y + (point.y - start.y) };
+  // Snap in canvas coordinates so existing rotation and scaling do not affect the angle.
+  const endpoint = constrained ? snapSegmentEnd(anchor, target) : target;
+  const local = worldToObject(original, endpoint);
   const end = movingStart
-    ? { x: original.end.x - dx, y: original.end.y - dy }
-    : { x: original.end.x + dx, y: original.end.y + dy };
+    ? { x: original.end.x - local.x, y: original.end.y - local.y }
+    : local;
   // Keep the endpoints distinct so the segment and both handles stay reachable.
   if (Math.hypot(end.x, end.y) < 1e-6) return;
-  if (movingStart) {
-    object.x = original.x + (point.x - start.x);
-    object.y = original.y + (point.y - start.y);
-  }
+  if (movingStart) Object.assign(object, endpoint);
   setShapeEnd(object, end);
 }
 
@@ -1183,7 +1186,7 @@ function movePointer(event) {
       sceneDirty = true;
       break;
     case "endpoint":
-      moveEndpoint(point);
+      moveEndpoint(point, primaryModifier(event));
       sceneDirty = true;
       break;
     case "rotate":
@@ -1366,6 +1369,27 @@ function insertObjects(items) {
   commitSceneEdit();
 }
 
+function cloneObjects(items, offset) {
+  const groupCopies = new Map();
+  return items.map(object => {
+    const copy = { ...object, x: object.x + offset.x, y: object.y + offset.y };
+    if (object.groupId) {
+      if (!groupCopies.has(object.groupId)) groupCopies.set(object.groupId, newGroupId());
+      copy.groupId = groupCopies.get(object.groupId);
+    }
+    return copy;
+  });
+}
+
+function pasteObjects(items) {
+  const point = worldPoint(canvasPointer ? screenPoint(canvasPointer) : viewCenter());
+  const { left, top, right, bottom } = sceneBounds(items);
+  insertObjects(cloneObjects(items, {
+    x: point.x - (left + right) / 2,
+    y: point.y - (top + bottom) / 2,
+  }));
+}
+
 async function importImage(blob, point = worldPoint(viewCenter())) {
   if (!blob || !blob.type.startsWith("image/")) {
     announce("imageError");
@@ -1395,6 +1419,7 @@ async function copyImage(full) {
   announce("copying");
   const png = capturePng(full);
   const localCopy = png.catch(() => null);
+  localClipboardObjects = null;
   localClipboardImage = localCopy;
   try {
     await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
@@ -1422,6 +1447,10 @@ async function pasteImage() {
     // A native paste event can still provide the image when clipboard.read is denied.
   }
   if (generation !== sceneGeneration) return;
+  if (localClipboardObjects) {
+    pasteObjects(localClipboardObjects.items);
+    return;
+  }
   const pasted = await pasteLocal();
   if (!pasted && generation === sceneGeneration) announce("pasteUnavailable");
 }
@@ -1608,7 +1637,13 @@ async function downloadImage(full) {
 
 canvas.addEventListener("pointerdown", startPointer);
 canvas.addEventListener("blur", () => canvas.removeAttribute("data-pointer-focus"));
-canvas.addEventListener("pointermove", movePointer);
+canvas.addEventListener("pointermove", event => {
+  if (event.pointerType !== "touch") {
+    canvasPointer = { clientX: event.clientX, clientY: event.clientY };
+  }
+  movePointer(event);
+});
+canvas.addEventListener("pointerleave", () => { canvasPointer = null; });
 canvas.addEventListener("pointerup", event => finishPointer(event, false));
 canvas.addEventListener("pointercancel", event => finishPointer(event, true));
 canvas.addEventListener("lostpointercapture", event => finishPointer(event, true));
@@ -1637,13 +1672,9 @@ canvas.addEventListener("dblclick", event => {
 });
 
 canvas.addEventListener("keydown", event => {
-  canvas.removeAttribute("data-pointer-focus");
   const { key } = event;
-  if (primaryModifier(event) && event.code === "KeyC") {
-    event.preventDefault();
-    showExportOptions("copy");
-    return;
-  }
+  if (key === "Meta" || key === "Control") return;
+  canvas.removeAttribute("data-pointer-focus");
   if (key === "Escape") {
     cancelGesture();
     if (crop) finishCrop(false);
@@ -1693,11 +1724,12 @@ canvas.addEventListener("keydown", event => {
 
 function updateConstrainedGesture(event) {
   if (!gesture || event.key !== modifierKey) return;
-  if (!["resize", "shape", "rotate"].includes(gesture.kind)) return;
+  if (!["resize", "shape", "rotate", "endpoint"].includes(gesture.kind)) return;
   const point = worldPoint(pointers.get(gesture.id));
   const constrained = primaryModifier(event);
   if (gesture.kind === "resize") resizeSelection(point, constrained);
   else if (gesture.kind === "rotate") updateRotation(point, constrained);
+  else if (gesture.kind === "endpoint") moveEndpoint(point, constrained);
   else updateShape(draft, point, constrained);
   if (gesture.kind === "shape") requestDraw();
   else requestSceneDraw();
@@ -1733,15 +1765,7 @@ document.addEventListener("keydown", event => {
   if (event.repeat) return;
   const offset = 20 / view.zoom;
   const selectedObjects = objects.filter(object => selection.has(object));
-  const groupCopies = new Map();
-  insertObjects(selectedObjects.map(object => {
-    const copy = { ...object, x: object.x + offset, y: object.y + offset };
-    if (object.groupId) {
-      if (!groupCopies.has(object.groupId)) groupCopies.set(object.groupId, newGroupId());
-      copy.groupId = groupCopies.get(object.groupId);
-    }
-    return copy;
-  }));
+  insertObjects(cloneObjects(selectedObjects, { x: offset, y: offset }));
 });
 
 document.addEventListener("pointerdown", event => {
@@ -1772,8 +1796,33 @@ window.addEventListener("pagehide", () => {
 });
 touchLayout.addEventListener("change", updateControls);
 
+document.addEventListener("copy", event => {
+  if (app.inert || clearDialog.open || textEdit || crop || gesture ||
+    (event.target !== document.body && !app.contains(event.target)) ||
+    !event.clipboardData || window.getSelection()?.isCollapsed === false) return;
+  if (!selection.size) {
+    event.preventDefault();
+    copyImage(false);
+    return;
+  }
+  const token = crypto.randomUUID();
+  event.clipboardData.setData(objectClipboardType, token);
+  event.preventDefault();
+  // Completed geometry is shared by copies. Edits replace its paths and bounds.
+  const items = objects.filter(object => selection.has(object)).map(object => ({ ...object }));
+  localClipboardObjects = { token, items };
+  localClipboardImage = null;
+  announce("objectsCopied");
+});
+
 document.addEventListener("paste", event => {
-  if (app.inert || clearDialog.open || textEdit) return;
+  if (app.inert || clearDialog.open || textEdit || gesture) return;
+  const token = event.clipboardData?.getData(objectClipboardType);
+  if (token && token === localClipboardObjects?.token) {
+    event.preventDefault();
+    pasteObjects(localClipboardObjects.items);
+    return;
+  }
   const blob = Array.from(event.clipboardData?.files || []).find(file => file.type.startsWith("image/"));
   if (blob) {
     event.preventDefault();

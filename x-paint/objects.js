@@ -68,6 +68,14 @@ function distanceBetween(from, to) {
   return Math.hypot(to.x - from.x, to.y - from.y);
 }
 
+function snapSegmentEnd(anchor, point) {
+  const step = Math.PI / 4;
+  const angle = Math.atan2(point.y - anchor.y, point.x - anchor.x);
+  const snapped = Math.round(angle / step) * step;
+  const distance = distanceBetween(anchor, point);
+  return { x: anchor.x + Math.cos(snapped) * distance, y: anchor.y + Math.sin(snapped) * distance };
+}
+
 function createObject(type, point, color) {
   return { type, x: point.x, y: point.y, color, scaleX: 1, scaleY: 1 };
 }
@@ -112,6 +120,7 @@ function appendStrokePoint(object, offset) {
 }
 
 function updateShape(object, point, constrained = false) {
+  if (constrained && isSegment(object)) point = snapSegmentEnd(object, point);
   const end = { x: point.x - object.x, y: point.y - object.y };
   if (constrained && isFillable(object)) {
     const side = Math.max(Math.abs(end.x), Math.abs(end.y));
