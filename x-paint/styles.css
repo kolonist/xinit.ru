@@ -393,6 +393,60 @@
 .paint-dialog h2 { margin-top: 0; font-size: 1.1rem; }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; }
 
+#boards-dialog {
+  width: min(29rem, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  overflow: auto;
+}
+
+#boards-status {
+  margin: 0.8rem 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+#boards-status:empty, #boards-list:empty { display: none; }
+
+#boards-list {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 52dvh;
+  overflow: auto;
+  margin: 0.75rem -0.25rem;
+  padding: 0.25rem;
+  list-style: none;
+}
+
+.board-row.action-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  justify-content: stretch;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.3rem;
+  border-color: var(--border);
+  text-align: start;
+}
+
+.board-row[aria-current="true"] { border-color: var(--accent); }
+
+.board-preview {
+  display: grid;
+  place-items: center;
+  width: clamp(3rem, 18vw, 4.5rem);
+  aspect-ratio: 19 / 12;
+  overflow: hidden;
+  background: #061324;
+  color: var(--muted);
+}
+
+.board-preview canvas { width: 100%; height: 100%; }
+.board-preview svg, .board-row > svg { width: 1.1rem; height: 1.1rem; }
+
+.board-details { display: grid; gap: 0.2rem; }
+.board-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-date { font-size: 0.73rem; font-weight: 400; }
+
 .canvas-hint {
   display: grid;
   justify-items: center;

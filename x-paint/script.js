@@ -40,6 +40,9 @@ const transparencyValue = document.querySelector("#fill-transparency-value");
 const transparencyControls = transparencyInput.closest(".fill-transparency");
 const clearDialog = document.querySelector("#clear-dialog");
 const shareLimitDialog = document.querySelector("#share-limit-dialog");
+const boardsDialog = document.querySelector("#boards-dialog");
+const boardsList = document.querySelector("#boards-list");
+const boardsStatus = document.querySelector("#boards-status");
 const touchLayout = window.matchMedia("(pointer: coarse)");
 const appleKeyboard = /^(Mac|iP)/i.test(navigator.userAgentData?.platform || navigator.platform);
 const modifierKey = appleKeyboard ? "Meta" : "Control";
@@ -83,7 +86,11 @@ let openSettings = null;
 let database;
 let drawingId = null;
 let saveRevision = 0;
+let pendingSceneSave;
 let projectDirty = false;
+let switchingBoard = false;
+let boardListRevision = 0;
+let boardPreviews;
 let preparingShare = false;
 let sceneGeneration = 0;
 let crop = null;
@@ -234,6 +241,9 @@ const saveProjectButton = addButton(actions, "saveProject", saveProjectFile);
 saveProjectButton.setAttribute("aria-keyshortcuts", `${modifierKey}+S`);
 const shareButton = addButton(actions, "share", sharePaintScene);
 const shareButtonIcon = shareButton.querySelector("svg");
+const boardsButton = addButton(actions, "boards", showPaintBoards);
+boardsButton.setAttribute("aria-haspopup", "dialog");
+boardsButton.setAttribute("aria-controls", boardsDialog.id);
 const openFileButton = addButton(actions, "openFile", () => fileInput.click());
 openFileButton.setAttribute("aria-keyshortcuts", `${modifierKey}+O`);
 const pasteButton = addButton(actions, "paste", pasteImage);
@@ -869,7 +879,7 @@ function zoomAt(anchor, nextZoom, point = worldPoint(anchor)) {
   requestViewPreview();
   if (!gesture) {
     clearTimeout(viewSaveTimer);
-    viewSaveTimer = setTimeout(persistScene, 180);
+    viewSaveTimer = setTimeout(() => persistScene(false), 180);
   }
 }
 
@@ -1297,7 +1307,7 @@ function finishPointer(event, cancelled) {
   if (gesture?.kind === "pinch") {
     if (pointers.size < 2) {
       gesture = null;
-      persistScene();
+      persistScene(false);
     }
     else {
       const { center, distance } = pinchGeometry();
@@ -1336,7 +1346,7 @@ function finishPointer(event, cancelled) {
         }));
       }
       if (kind === "move" || kind === "resize" || kind === "rotate" || kind === "endpoint") commitSceneEdit();
-      if (kind === "pan") persistScene();
+      if (kind === "pan") persistScene(false);
     }
   }
   updateControls();
@@ -1594,7 +1604,7 @@ function currentPaintScene() {
   };
 }
 
-function persistScene() {
+function persistScene(updateDetails = true) {
   clearTimeout(viewSaveTimer);
   viewSaveTimer = undefined;
   const scene = currentPaintScene();
@@ -1608,7 +1618,7 @@ function persistScene() {
     return;
   }
   const revision = ++saveRevision;
-  savePaintScene(database, scene, paintDrawingKey(drawingId)).then(() => {
+  pendingSceneSave = savePaintScene(database, scene, paintDrawingKey(drawingId), updateDetails).then(() => {
     if (revision === saveRevision) setProjectDirty(false);
   }).catch(() => {
     if (revision !== saveRevision) return;
@@ -1708,13 +1718,172 @@ function setProjectDirty(dirty) {
   else window.removeEventListener("beforeunload", warnUnsavedProject);
 }
 
+function createPaintBoardRow({ id, title, modified }, dateFormat) {
+  const item = document.createElement("li");
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "action-button board-row";
+  row.dataset.boardId = id;
+  row.innerHTML = `<span class="board-preview" aria-hidden="true">${paintIconMarkup("boards")}</span>
+    <span class="board-details"><span class="board-title"></span></span>`;
+  const heading = row.querySelector(".board-title");
+  heading.textContent = title || label("untitledBoard");
+  heading.title = heading.textContent;
+  const date = document.createElement(modified ? "time" : "span");
+  date.className = "board-date";
+  if (modified) {
+    date.dateTime = new Date(modified).toISOString();
+    date.textContent = dateFormat.format(modified);
+  } else {
+    date.textContent = label("unknownBoardDate");
+  }
+  heading.after(date);
+  if (id === drawingId) {
+    row.setAttribute("aria-current", "true");
+    row.insertAdjacentHTML("beforeend", paintIconMarkup("check"));
+  }
+  row.addEventListener("click", () => switchPaintBoard(id));
+  item.append(row);
+  return item;
+}
+
+async function loadPaintBoardPreview(row) {
+  const saved = await readPaintScene(database, paintDrawingKey(row.dataset.boardId));
+  if (!saved || !row.isConnected || !boardsDialog.open) return;
+  if (!row.querySelector("time")) {
+    const title = paintBoardTitle(saved);
+    if (title) {
+      const heading = row.querySelector(".board-title");
+      heading.textContent = heading.title = title;
+    }
+  }
+  if (!saved.objects.length) return;
+  const thumbnail = document.createElement("canvas");
+  thumbnail.width = 152;
+  thumbnail.height = 96;
+  const previewContext = thumbnail.getContext("2d");
+  const restored = await Promise.all(saved.objects.map(object => restorePaintObject(object, previewContext)));
+  if (!row.isConnected || !boardsDialog.open) return;
+  const { x, y, width, height } = wholeArea(restored, 0);
+  const scale = Math.min((thumbnail.width - 16) / Math.max(1, width),
+    (thumbnail.height - 16) / Math.max(1, height));
+  previewContext.translate((thumbnail.width - width * scale) / 2, (thumbnail.height - height * scale) / 2);
+  previewContext.scale(scale, scale);
+  previewContext.translate(x, y);
+  restored.forEach(object => drawObject(previewContext, object));
+  row.querySelector(".board-preview").replaceChildren(thumbnail);
+}
+
+async function showPaintBoards() {
+  if (boardsDialog.open) return;
+  const revision = ++boardListRevision;
+  finishTextEdit(true);
+  closePalette();
+  closeSettingsPopup();
+  setExportOptions(false);
+  boardPreviews?.disconnect();
+  boardsList.replaceChildren();
+  boardsStatus.textContent = label("loadingBoards");
+  boardsDialog.showModal();
+  try {
+    const boards = await readPaintBoards(database);
+    if (revision !== boardListRevision || !boardsDialog.open) return;
+    if (!switchingBoard) boardsStatus.textContent = boards.length ? "" : label("emptyBoards");
+    const dateFormat = new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" });
+    boardsList.replaceChildren(...boards.map(board => createPaintBoardRow(board, dateFormat)));
+    let previewQueue = Promise.resolve();
+    const previews = new IntersectionObserver(entries => {
+      for (const { target, isIntersecting } of entries) {
+        if (!isIntersecting) continue;
+        previews.unobserve(target);
+        previewQueue = previewQueue.then(() => {
+          if (boardsDialog.open && target.isConnected) return loadPaintBoardPreview(target);
+        }).catch(() => {
+          // A preview failure should not prevent the other boards from loading.
+        });
+      }
+    }, { root: boardsList });
+    boardPreviews = previews;
+    boardsList.querySelectorAll(".board-row").forEach(row => previews.observe(row));
+  } catch {
+    if (revision === boardListRevision && boardsDialog.open && !switchingBoard) {
+      boardsStatus.textContent = label("boardsError");
+    }
+  }
+}
+
+async function switchPaintBoard(id) {
+  if (switchingBoard) return;
+  if (id && id === drawingId) {
+    boardsDialog.close();
+    canvas.focus({ preventScroll: true });
+    return;
+  }
+  switchingBoard = true;
+  sceneGeneration++;
+  cancelGesture();
+  boardsStatus.textContent = label("openingBoard");
+  try {
+    if (viewSaveTimer !== undefined) persistScene(false);
+    await pendingSceneSave;
+    if (projectDirty && !window.confirm(label("discardProject"))) {
+      boardsStatus.textContent = "";
+      return;
+    }
+    const saved = id ? await readPaintScene(database, paintDrawingKey(id)) : { view: { x: 0, y: 0, zoom: 1 }, objects: [] };
+    if (!saved) throw new Error("Board no longer exists");
+    const restored = await Promise.all(saved.objects.map(object => restorePaintObject(object, context)));
+    replacePaintDrawingPath(id);
+    resetPaintInteraction();
+    drawingId = id;
+    forgetLegacyPaintWorkspace();
+    applyPaintScene(saved, restored);
+    announce();
+    boardsDialog.close();
+    canvas.focus({ preventScroll: true });
+  } catch {
+    boardsStatus.textContent = label("boardOpenError");
+  } finally {
+    switchingBoard = false;
+  }
+}
+
+document.querySelector("#new-board").addEventListener("click", () => switchPaintBoard(null));
+
+function isBoardsBackdrop(event) {
+  if (event.target !== boardsDialog) return false;
+  const { left, top, right, bottom } = boardsDialog.getBoundingClientRect();
+  return event.clientX < left || event.clientX >= right || event.clientY < top || event.clientY >= bottom;
+}
+
+let boardsBackdropPressed = false;
+boardsDialog.addEventListener("pointerdown", event => {
+  boardsBackdropPressed = event.button === 0 && isBoardsBackdrop(event);
+});
+boardsDialog.addEventListener("click", event => {
+  if (boardsBackdropPressed && isBoardsBackdrop(event) && !switchingBoard) boardsDialog.close();
+  boardsBackdropPressed = false;
+});
+boardsDialog.addEventListener("cancel", event => {
+  if (switchingBoard) event.preventDefault();
+});
+boardsDialog.addEventListener("submit", event => {
+  if (switchingBoard) event.preventDefault();
+});
+boardsDialog.addEventListener("close", () => {
+  if (boardsDialog.open) return;
+  boardsBackdropPressed = false;
+  boardPreviews?.disconnect();
+  boardsList.replaceChildren();
+});
+
 async function openProjectCopy(project, fromFile = false) {
   try {
     const saved = await project;
     const restored = await Promise.all(saved.objects.map(object => restorePaintObject(object, context)));
     if (fromFile && projectDirty &&
       !window.confirm(label("discardProject"))) return false;
-    if (viewSaveTimer !== undefined) persistScene();
+    if (viewSaveTimer !== undefined) persistScene(false);
     finishTextEdit(!projectDirty);
     cancelGesture();
     crop = null;
@@ -1820,7 +1989,7 @@ async function sharePaintScene() {
 function saveProjectFile() {
   try {
     finishTextEdit(true);
-    if (viewSaveTimer !== undefined) persistScene();
+    if (viewSaveTimer !== undefined) persistScene(false);
     const project = packPaintProject(currentPaintScene());
     downloadPaintBlob(project, paintFileName("xpaint"));
     setProjectDirty(false);
@@ -1828,6 +1997,18 @@ function saveProjectFile() {
   } catch {
     announce("projectSaveError");
   }
+}
+
+function resetPaintInteraction() {
+  cancelGesture();
+  pointers.clear();
+  closeTextEditor();
+  closePalette();
+  closeSettingsPopup();
+  crop = null;
+  laserPoints.length = 0;
+  selection.clear();
+  setExportOptions(false);
 }
 
 clearDialog.addEventListener("close", async () => {
@@ -1846,13 +2027,7 @@ clearDialog.addEventListener("close", async () => {
     announce("clearError");
     return;
   }
-  closeTextEditor();
-  closePalette();
-  closeSettingsPopup();
-  crop = null;
-  laserPoints.length = 0;
-  selection.clear();
-  setExportOptions(false);
+  resetPaintInteraction();
   drawingId = null;
   replacePaintDrawingPath(null);
   forgetLegacyPaintWorkspace();
@@ -1985,7 +2160,7 @@ canvas.addEventListener("keydown", event => {
     } else {
       view.x -= x * step;
       view.y -= y * step;
-      persistScene();
+      persistScene(false);
     }
     requestDraw();
   }
@@ -2006,7 +2181,8 @@ function updateConstrainedGesture(event) {
 }
 
 document.addEventListener("keydown", event => {
-  if (app.inert || clearDialog.open || shareLimitDialog.open || event.defaultPrevented || event.target === shareLink) return;
+  if (app.inert || clearDialog.open || shareLimitDialog.open || boardsDialog.open ||
+    event.defaultPrevented || event.target === shareLink) return;
   if (openSettings && event.key === "Escape") {
     event.preventDefault();
     closeSettingsPopup(true);
@@ -2080,7 +2256,7 @@ window.addEventListener("keydown", updateConstrainedGesture);
 window.addEventListener("keyup", updateConstrainedGesture);
 window.addEventListener("blur", releaseSpace);
 window.addEventListener("pagehide", () => {
-  if (viewSaveTimer !== undefined) persistScene();
+  if (viewSaveTimer !== undefined) persistScene(false);
 });
 window.addEventListener("hashchange", event => {
   const previous = new URL(event.oldURL);
@@ -2097,7 +2273,7 @@ window.addEventListener("hashchange", event => {
 touchLayout.addEventListener("change", updateControls);
 
 document.addEventListener("copy", event => {
-  if (app.inert || clearDialog.open || textEdit || crop || gesture || event.target === shareLink ||
+  if (app.inert || clearDialog.open || boardsDialog.open || textEdit || crop || gesture || event.target === shareLink ||
     (event.target !== document.body && !app.contains(event.target)) ||
     !event.clipboardData || window.getSelection()?.isCollapsed === false) return;
   if (!selection.size) {
@@ -2116,7 +2292,8 @@ document.addEventListener("copy", event => {
 });
 
 document.addEventListener("paste", event => {
-  if (app.inert || clearDialog.open || shareLimitDialog.open || textEdit || gesture || event.target === shareLink) return;
+  if (app.inert || clearDialog.open || shareLimitDialog.open || boardsDialog.open ||
+    textEdit || gesture || event.target === shareLink) return;
   const token = event.clipboardData?.getData(objectClipboardType);
   if (token && token === localClipboardObjects?.token) {
     event.preventDefault();
@@ -2151,7 +2328,7 @@ async function openPaintFile(file, point) {
 fileInput.addEventListener("change", () => {
   const file = fileInput.files[0];
   fileInput.value = "";
-  if (file && !app.inert) openPaintFile(file);
+  if (file && !app.inert && !boardsDialog.open) openPaintFile(file);
 });
 
 stage.addEventListener("dragover", event => {
@@ -2168,7 +2345,7 @@ stage.addEventListener("drop", event => {
   event.preventDefault();
   stage.removeAttribute("data-drop");
   const file = Array.from(event.dataTransfer.files).find(item => isProjectFile(item) || item.type.startsWith("image/"));
-  if (app.inert) return;
+  if (app.inert || boardsDialog.open) return;
   if (file) openPaintFile(file, worldPoint(screenPoint(event)));
   else announce("imageError");
 });

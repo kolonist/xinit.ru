@@ -155,6 +155,16 @@
     <input type="file" id="paint-file" accept="image/*,.xpaint" hidden>
   </main>
 
+  <dialog class="panel paint-dialog" id="boards-dialog" aria-labelledby="boards-title">
+    <h2 id="boards-title" data-i18n="boards">Мои доски</h2>
+    <button class="action-button" id="new-board" type="button" data-i18n="newBoard" autofocus>Новая доска</button>
+    <p id="boards-status" role="status"></p>
+    <ul id="boards-list"></ul>
+    <form class="dialog-actions" method="dialog">
+      <button class="action-button" data-i18n="close">Закрыть</button>
+    </form>
+  </dialog>
+
   <dialog class="panel paint-dialog" id="clear-dialog" aria-labelledby="clear-title">
     <form method="dialog">
       <h2 id="clear-title" data-i18n="clear">Очистить холст</h2>

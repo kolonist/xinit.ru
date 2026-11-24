@@ -17,12 +17,17 @@ function readPaintScene(database, key) {
   });
 }
 
-function savePaintScene(database, scene, key) {
+function savePaintScene(database, scene, key, updateDetails = true) {
   return new Promise((resolve, reject) => {
     const transaction = database.transaction("drawings", "readwrite");
     transaction.oncomplete = resolve;
     transaction.onabort = () => reject(transaction.error);
-    transaction.objectStore("drawings").put(scene, key);
+    const store = transaction.objectStore("drawings");
+    store.put(scene, key);
+    const id = paintBoardId(key);
+    if (updateDetails && id) {
+      store.put({ id, title: paintBoardTitle(scene), modified: Date.now() }, `board:${id}`);
+    }
     transaction.commit?.();
   });
 }
@@ -32,13 +37,56 @@ function deletePaintScene(database, key) {
     const transaction = database.transaction("drawings", "readwrite");
     transaction.oncomplete = resolve;
     transaction.onabort = () => reject(transaction.error);
-    transaction.objectStore("drawings").delete(key);
+    const store = transaction.objectStore("drawings");
+    store.delete(key);
+    const id = paintBoardId(key);
+    if (id) store.delete(`board:${id}`);
     transaction.commit?.();
   });
 }
 
 function paintDrawingKey(id) {
   return `project:${id}`;
+}
+
+function paintBoardId(key) {
+  return key.startsWith("project:") ? validatePaintDrawingId(key.slice("project:".length)) : null;
+}
+
+function paintBoardTitle(scene) {
+  const text = scene.objects.find(object => object.type === "text" && object.text?.trim())?.text;
+  return text?.trim().split("\n", 1)[0].trim().slice(0, 120) ?? "";
+}
+
+function readPaintBoardIndex(database) {
+  return new Promise((resolve, reject) => {
+    // Separate keys keep the list small and let older tabs keep using the same database.
+    const transaction = database.transaction("drawings");
+    const store = transaction.objectStore("drawings");
+    const keys = store.getAllKeys(IDBKeyRange.bound("project:", "project:\uffff"));
+    const details = store.getAll(IDBKeyRange.bound("board:", "board:\uffff"));
+    const legacyCurrent = store.getKey("current");
+    transaction.onabort = () => reject(transaction.error);
+    transaction.oncomplete = () => resolve({ keys: keys.result, details: details.result, legacyCurrent: legacyCurrent.result });
+  });
+}
+
+async function readPaintBoards(database) {
+  let index = await readPaintBoardIndex(database);
+  const legacyKeys = index.keys.filter(isLegacyPaintProjectKey);
+  if (index.legacyCurrent) legacyKeys.push(index.legacyCurrent);
+  if (legacyKeys.length) {
+    await Promise.all(legacyKeys.map(key => migratePaintScene(database, key)));
+    index = await readPaintBoardIndex(database);
+  }
+  const byId = new Map(index.details.map(board => [board.id, board]));
+  return index.keys.map(paintBoardId).filter(Boolean)
+    .map(id => byId.get(id) ?? { id, title: "", modified: null })
+    .sort((first, second) => second.modified - first.modified);
+}
+
+function isLegacyPaintProjectKey(key) {
+  return typeof key === "string" && /^project:\d+(?:-\d+){3}$/.test(key);
 }
 
 function readLegacyPaintWorkspace() {
@@ -48,7 +96,7 @@ function readLegacyPaintWorkspace() {
   } catch {
     // The previous entry may still identify the project.
   }
-  return typeof key === "string" && /^project:\d+(?:-\d+){3}$/.test(key) ? key : null;
+  return isLegacyPaintProjectKey(key) ? key : null;
 }
 
 function forgetLegacyPaintWorkspace() {
