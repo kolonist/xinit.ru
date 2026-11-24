@@ -14,11 +14,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Roboto:wdth,wght@80,300&display=swap">
   <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="home.css">
+  <link rel="stylesheet" href="home.css?v=3">
   <script src="site-language.js?v=2" defer></script>
   <script src="site-footer.js" defer></script>
   <script src="site-navigation.js" defer></script>
-  <script src="home.js?v=7" defer></script>
+  <script src="home.js?v=12" defer></script>
 </head>
 <body>
   <header class="site-bar">
@@ -92,18 +92,26 @@
     <section class="panel home-feature home-paint" aria-labelledby="paint-title">
       <div class="home-feature-copy">
         <h2 id="paint-title">x-paint</h2>
-        <p class="home-feature-description" data-i18n="paintDescription">Рисуйте схемы и добавляйте пометки на изображения</p>
+        <p class="home-feature-description" data-i18n="paintDescription">Нужно быстро разметить скриншот или набросать схемку? Обрежьте снимок, выделите важное, добавьте стрелки и подписи. Скопируйте результат в PNG и вставьте в сообщение или презентацию.</p>
+        <p class="home-feature-description" data-i18n="paintBoardsDescription">Ведите несколько досок, храните их прямо в браузере, сохраняйте на диск, делитесь ссылками. Демонстрируйте экран с лазерной указкой.</p>
         <a class="action-button" href="x-paint/">
           <span data-i18n="openPaint">Открыть x-paint</span>
           <span aria-hidden="true">→</span>
         </a>
       </div>
       <figure class="home-preview">
-        <div class="preview-stage">
-          <img class="home-paint-image" src="x-paint/preview.webp" width="960" height="448"
-            alt="Схема со стрелками на холсте x-paint" data-i18n-alt="paintPreviewImage">
+        <div class="home-paint-preview">
+          <img class="home-paint-image" src="x-paint/preview.webp?v=3" width="1140" height="708"
+            alt="Стрелка на фото самолёта ведёт от бортового номера к увеличенному фрагменту. Справа маркером выделены строки в списке сообщений."
+            data-i18n-alt="paintPreviewImage">
         </div>
-        <figcaption class="home-preview-caption" data-i18n="paintPreview">Пример рисунка</figcaption>
+        <figcaption class="home-preview-caption">
+          <span data-i18n="paintPreview">Пример разметки скриншота</span>
+          <button class="home-paint-laser-toggle" type="button" hidden>
+            <span data-i18n="pausePaintLaser">Остановить анимацию</span>
+            <span data-i18n="playPaintLaser" hidden>Запустить анимацию</span>
+          </button>
+        </figcaption>
       </figure>
     </section>
   </main>

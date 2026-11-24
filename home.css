@@ -99,10 +99,44 @@
   margin-top: 1rem;
 }
 
+.home-paint .home-feature-description:first-of-type {
+  margin-bottom: 0.7rem;
+}
+
+.home-paint-preview {
+  position: relative;
+}
+
 .home-paint-image {
   display: block;
   width: 100%;
   height: auto;
-  border: 1px solid var(--border);
   box-shadow: 0 14px 28px #0007;
+}
+
+.home-paint-laser {
+  position: absolute;
+  /* The overlay covers the title and the highlighted lines in the ticket. */
+  left: calc(100% * 156 / 1140);
+  top: calc(100% * 58 / 708);
+  width: calc(100% * 814 / 1140);
+  height: auto;
+  pointer-events: none;
+}
+
+.home-paint-laser-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  text-align: end;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.home-paint-laser-toggle:hover { color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .home-paint-laser, .home-paint-laser-toggle { display: none; }
 }
