@@ -117,7 +117,7 @@
   max-width: 100%;
   padding: 0.25rem;
   border: 1px solid var(--border);
-  background: #07182e;
+  background: #07182ef5;
   box-shadow: 0 2px #020a1580, inset 0 1px #63d6ff2b;
   pointer-events: auto;
 }
