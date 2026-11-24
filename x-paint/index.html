@@ -73,6 +73,25 @@
         <span class="stroke-sample" aria-hidden="true"></span>
       </div>
     </div>
+    <div class="control-group paint-popup" id="line-style-popup" role="radiogroup"
+      data-i18n-label="lineStyle" aria-label="Тип линии" hidden>
+      <label class="line-style-option">
+        <input type="radio" name="line-style" value="solid" checked>
+        <span data-i18n="lineStyleSolid">Сплошная</span>
+        <svg viewBox="0 0 48 12" aria-hidden="true"><path d="M2 6h44"/></svg>
+      </label>
+      <label class="line-style-option">
+        <input type="radio" name="line-style" value="dashed">
+        <span data-i18n="lineStyleDashed">Пунктирная</span>
+        <svg viewBox="0 0 48 12" aria-hidden="true"><path d="M2 6h44" stroke-dasharray="9 8.5"/></svg>
+      </label>
+      <label class="line-style-option">
+        <input type="radio" name="line-style" value="dotted">
+        <span data-i18n="lineStyleDotted">Точечная</span>
+        <svg viewBox="0 0 48 12" aria-hidden="true"><path d="M2 6h44" stroke-dasharray="0.01 7.3"/></svg>
+      </label>
+      <p class="line-style-mixed" data-i18n="lineStyleMixed" hidden>Разные стили</p>
+    </div>
 
     <section class="preview-stage paint-stage" id="stage" data-i18n-label="canvas" aria-label="Область рисования">
       <canvas id="drawing" tabindex="0" data-i18n-label="canvas" aria-label="Область рисования"

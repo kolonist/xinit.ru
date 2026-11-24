@@ -20,6 +20,10 @@ const exportVisible = document.querySelector("#export-visible");
 const exportAll = document.querySelector("#export-all");
 const palettePopup = document.querySelector("#palette-popup");
 const strokePopup = document.querySelector("#stroke-popup");
+const lineStylePopup = document.querySelector("#line-style-popup");
+const lineStyleInputs = [...lineStylePopup.querySelectorAll("input")];
+const mixedLineStyles = lineStylePopup.querySelector(".line-style-mixed");
+const lineStyleLabels = { solid: "lineStyleSolid", dashed: "lineStyleDashCaption", dotted: "lineStyleDotted" };
 const strokeSliders = [...strokePopup.querySelectorAll("input")].map(input => ({
   kind: input.id === "marker-weight" ? "marker" : "stroke",
   input,
@@ -54,7 +58,7 @@ const selection = new Set();
 const undoHistory = [];
 const undoLimit = 42;
 const editableProperties = ["x", "y", "scaleX", "scaleY", "angle", "shear", "color", "fill",
-  "fillTransparency", "groupId", "text", "source", "weight"];
+  "fillTransparency", "groupId", "text", "source", "weight", "end", "lineStyle"];
 const propertyDefaults = { angle: 0, shear: 0, fill: null, fillTransparency: 0 };
 let committedObjects = [];
 const view = { x: 0, y: 0, zoom: 1 };
@@ -68,7 +72,9 @@ const defaultColors = { color: colors[0][1], backgroundColor: "#0b2943", fillEna
 let { color, backgroundColor, fillEnabled, fillTransparency } = defaultColors;
 const defaultStrokeWeights = { stroke: defaultStrokeWeight, marker: defaultMarkerWeight };
 const strokeWeights = { ...defaultStrokeWeights };
+let lineStyle = "solid";
 let paletteTarget = null;
+let openSettings = null;
 let database;
 let sceneGeneration = 0;
 let crop = null;
@@ -160,12 +166,24 @@ transparencyInput.addEventListener("input", () => {
 });
 transparencyInput.addEventListener("change", () => commitSceneEdit());
 
-const strokeButton = addButton(document.querySelector(".stroke-tools"), "strokeWidth", toggleStrokePopup);
-const strokeLabel = document.createElement("span");
-strokeLabel.dataset.i18n = "strokeWidth";
-strokeButton.append(strokeLabel);
-strokeButton.setAttribute("aria-controls", strokePopup.id);
-strokeButton.setAttribute("aria-expanded", "false");
+const strokeTools = document.querySelector(".stroke-tools");
+addSettingsButton("strokeWidth", strokePopup, () => {
+  const kind = strokeKind(singleSelection()?.type ?? activeTool);
+  return strokeSliders.find(slider => slider.kind === kind).input;
+});
+const lineStyleButton = addSettingsButton("lineStyle", lineStylePopup, () =>
+  lineStyleInputs.find(input => input.checked) || lineStyleInputs[0]);
+const lineStyleCaption = lineStyleButton.querySelector("span");
+lineStylePopup.addEventListener("change", event => {
+  lineStyle = event.target.value;
+  cancelGesture();
+  for (const object of selection) {
+    if (hasLineStyle(object)) object.lineStyle = lineStyle;
+  }
+  updateControls();
+  requestDraw();
+  commitSceneEdit();
+});
 for (const { kind, input } of strokeSliders) {
   input.addEventListener("input", () => {
     const weight = input.valueAsNumber;
@@ -208,7 +226,7 @@ const cropButton = addButton(selectionActions, "crop", () => {
   canvas.focus({ preventScroll: true });
   requestDraw();
 });
-addButton(selectionActions, "rotate", rotateQuarterTurn);
+const rotateButton = addButton(selectionActions, "rotate", rotateQuarterTurn);
 const backButton = addButton(selectionActions, "sendToBack", () => moveLayers(-1, true));
 const lowerButton = addButton(selectionActions, "lower", () => moveLayers(-1));
 const raiseButton = addButton(selectionActions, "raise", () => moveLayers(1));
@@ -240,6 +258,15 @@ function singleSelection() {
   return selection.size === 1 ? selection.values().next().value : null;
 }
 
+function selectedSegment() {
+  const object = singleSelection();
+  return isSegment(object) ? object : null;
+}
+
+function hasLineStyle(object) {
+  return Boolean(object && (object.type === "brush" || isSegment(object) || isFillable(object)));
+}
+
 function setSelection(items) {
   selection.clear();
   const groups = new Set();
@@ -255,6 +282,7 @@ function setSelection(items) {
   const object = singleSelection();
   if (object?.color) color = object.color;
   if (object?.weight !== undefined) strokeWeights[strokeKind(object.type)] = object.weight;
+  if (hasLineStyle(object)) lineStyle = object.lineStyle;
   if (object && isFillable(object)) {
     fillEnabled = Boolean(object.fill);
     if (object.fill) {
@@ -338,7 +366,7 @@ function positionPopup(popup, button) {
 
 function positionPopups() {
   if (paletteTarget) positionPopup(palettePopup, paletteAnchor());
-  if (!strokePopup.hidden) positionPopup(strokePopup, strokeButton);
+  if (openSettings) positionPopup(openSettings.popup, openSettings.button);
 }
 
 function togglePalette(target) {
@@ -346,7 +374,7 @@ function togglePalette(target) {
     closePalette(true);
     return;
   }
-  closeStrokePopup();
+  closeSettingsPopup();
   paletteTarget = target;
   palettePopup.hidden = false;
   updateColors();
@@ -359,23 +387,38 @@ function strokeKind(tool) {
   return tool === "marker" ? "marker" : "stroke";
 }
 
-function toggleStrokePopup() {
-  if (!strokePopup.hidden) {
-    closeStrokePopup(true);
-    return;
-  }
-  closePalette();
-  strokePopup.hidden = false;
-  strokeButton.setAttribute("aria-expanded", "true");
-  positionPopups();
-  const kind = strokeKind(singleSelection()?.type ?? activeTool);
-  strokeSliders.find(slider => slider.kind === kind).input.focus({ preventScroll: true });
+function addSettingsButton(key, popup, focusControl) {
+  const button = addButton(strokeTools, key, () => toggleSettingsPopup({ popup, button, focusControl }));
+  const caption = document.createElement("span");
+  caption.dataset.i18n = key;
+  button.append(caption);
+  button.setAttribute("aria-controls", popup.id);
+  button.setAttribute("aria-expanded", "false");
+  return button;
 }
 
-function closeStrokePopup(restoreFocus = false) {
-  strokePopup.hidden = true;
-  strokeButton.setAttribute("aria-expanded", "false");
-  if (restoreFocus) strokeButton.focus({ preventScroll: true });
+function toggleSettingsPopup(settings) {
+  if (openSettings?.popup === settings.popup) {
+    closeSettingsPopup(true);
+    return;
+  }
+  closeSettingsPopup();
+  closePalette();
+  openSettings = settings;
+  const { popup, button, focusControl } = settings;
+  popup.hidden = false;
+  button.setAttribute("aria-expanded", "true");
+  positionPopups();
+  focusControl().focus({ preventScroll: true });
+}
+
+function closeSettingsPopup(restoreFocus = false) {
+  if (!openSettings) return;
+  const { popup, button } = openSettings;
+  openSettings = null;
+  popup.hidden = true;
+  button.setAttribute("aria-expanded", "false");
+  if (restoreFocus) button.focus({ preventScroll: true });
 }
 
 function closePalette(restoreFocus = false) {
@@ -418,6 +461,17 @@ function updateControls() {
     output.value = `${weight} px`;
     sample.style.setProperty("--stroke-diameter", `${weight}px`);
   }
+  const selectedStyles = new Set([...selection].filter(hasLineStyle).map(object => object.lineStyle));
+  const displayedStyle = selectedStyles.size > 1 ? null : [...selectedStyles][0] ?? lineStyle;
+  for (const input of lineStyleInputs) input.checked = input.value === displayedStyle;
+  mixedLineStyles.hidden = displayedStyle !== null;
+  const buttonStyle = displayedStyle ?? lineStyle;
+  const styleName = label(lineStyleLabels[buttonStyle]);
+  const styleButtonName = `${label("lineStyle")} (${styleName})`;
+  lineStyleButton.dataset.lineStyle = buttonStyle;
+  lineStyleCaption.textContent = styleName;
+  lineStyleButton.setAttribute("aria-label", styleButtonName);
+  lineStyleButton.title = styleButtonName;
   exportAll.disabled = clearButton.disabled = objects.length === 0 && !textEdit;
   undoButton.disabled = undoHistory.length === 0;
   const object = singleSelection();
@@ -426,6 +480,7 @@ function updateControls() {
   textActions.hidden = !textEdit;
   editButton.hidden = object?.type !== "text";
   cropButton.hidden = object?.type !== "image";
+  rotateButton.hidden = Boolean(selectedSegment());
   const groupId = selection.values().next().value?.groupId;
   groupButton.hidden = selection.size < 2 || Boolean(groupId && [...selection].every(item => item.groupId === groupId));
   ungroupButton.hidden = ![...selection].some(item => item.groupId);
@@ -443,7 +498,8 @@ function updateControls() {
     circle: touchLayout.matches ? "touchDrawHint" : "shapeHint",
   };
   let hint = hints[activeTool] || (touchLayout.matches ? "touchDrawHint" : "drawHint");
-  if (selection.size) hint = touchLayout.matches ? "selectHint" : "resizeHint";
+  if (selectedSegment()) hint = "endpointsHint";
+  else if (selection.size) hint = touchLayout.matches ? "selectHint" : "resizeHint";
   if (crop) hint = "cropHint";
   if (textEdit) hint = "textEditHint";
   toolHint.textContent = label(hint);
@@ -507,6 +563,11 @@ function corners(bounds) {
 }
 
 function drawSelection() {
+  const segment = selectedSegment();
+  if (segment) {
+    drawEndpoints(segment);
+    return;
+  }
   const image = crop ? singleSelection() : null;
   const frame = image || selectionFrame();
   const bounds = crop || frame.bounds;
@@ -542,6 +603,25 @@ function drawSelection() {
     context.stroke();
     context.beginPath();
     context.arc(knob.x, knob.y, 4.5 * unit, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  }
+  context.restore();
+}
+
+function segmentEndpoints(object) {
+  return [objectToWorld(object, { x: 0, y: 0 }), objectToWorld(object, object.end)];
+}
+
+function drawEndpoints(object) {
+  const unit = 1 / view.zoom;
+  context.save();
+  context.strokeStyle = "#9ceaff";
+  context.fillStyle = "#061324";
+  context.lineWidth = unit;
+  for (const { x, y } of segmentEndpoints(object)) {
+    context.beginPath();
+    context.arc(x, y, 5 * unit, 0, Math.PI * 2);
     context.fill();
     context.stroke();
   }
@@ -639,7 +719,7 @@ function selectionFrame() {
 }
 
 function startResize(point, drawing) {
-  if (!selection.size) return null;
+  if (!selection.size || selectedSegment()) return null;
   const frame = selectionFrame();
   const { bounds } = frame;
   // Leave space for closely spaced brush strokes while a drawing tool is active.
@@ -648,6 +728,47 @@ function startResize(point, drawing) {
   return hit ? {
     kind: "resize", ...hit, frame, transforms: selectionTransforms(), start: worldToObject(frame, point),
   } : null;
+}
+
+function startEndpointDrag(point, additive) {
+  const object = selectedSegment();
+  if (!object) return null;
+  const [startHandle, endHandle] = segmentEndpoints(object);
+  const startDistance = distanceBetween(point, startHandle);
+  const endDistance = distanceBetween(point, endHandle);
+  const tolerance = (touchLayout.matches ? 16 : 10) / view.zoom;
+  if (Math.min(startDistance, endDistance) > tolerance) return null;
+  return {
+    kind: "endpoint", object, original: { ...object }, start: point,
+    localStart: worldToObject(object, point),
+    movingStart: startDistance <= endDistance,
+    toggleObject: additive ? objectAt(point) : null,
+  };
+}
+
+function restoreEndpoint({ object, original: { x, y, end, path, arrowhead, bounds } }) {
+  Object.assign(object, { x, y, end, path, arrowhead, bounds });
+}
+
+function moveEndpoint(point) {
+  const { object, original, start, localStart, movingStart } = gesture;
+  if (point.x === start.x && point.y === start.y) {
+    restoreEndpoint(gesture);
+    return;
+  }
+  const local = worldToObject(original, point);
+  const dx = local.x - localStart.x;
+  const dy = local.y - localStart.y;
+  const end = movingStart
+    ? { x: original.end.x - dx, y: original.end.y - dy }
+    : { x: original.end.x + dx, y: original.end.y + dy };
+  // Keep the endpoints distinct so the segment and both handles stay reachable.
+  if (Math.hypot(end.x, end.y) < 1e-6) return;
+  if (movingStart) {
+    object.x = original.x + (point.x - start.x);
+    object.y = original.y + (point.y - start.y);
+  }
+  setShapeEnd(object, end);
 }
 
 function startSelection(point, additive) {
@@ -699,7 +820,7 @@ function rotationState(frame) {
 }
 
 function startRotation(point) {
-  if (!selection.size || crop || textEdit) return null;
+  if (!selection.size || selectedSegment() || crop || textEdit) return null;
   const frame = selectionFrame();
   if (distanceBetween(point, objectToWorld(frame, rotationHandle(frame.bounds))) > 11 / view.zoom) return null;
   const rotation = rotationState(frame);
@@ -723,7 +844,7 @@ function updateRotation(point, snap) {
 }
 
 function rotateQuarterTurn() {
-  if (!selection.size) return;
+  if (!selection.size || selectedSegment()) return;
   cancelGesture();
   rotateSelection(rotationState(selectionFrame()), Math.PI / 2);
   updateControls();
@@ -879,11 +1000,14 @@ function startPointer(event) {
   }
 
   const pan = spaceHeld || event.button !== 0 || activeTool === "pan";
+  const endpoint = !pan && activeTool !== "laser" ? startEndpointDrag(point, primaryModifier(event)) : null;
   const rotation = !pan && activeTool !== "laser" ? startRotation(point) : null;
   const resize = !pan && !["select", "laser", "text"].includes(activeTool)
     ? startResize(point, true) : null;
   if (pan) {
     gesture = { kind: "pan", id: event.pointerId, start: screen, x: view.x, y: view.y };
+  } else if (endpoint) {
+    gesture = { ...endpoint, id: event.pointerId };
   } else if (rotation) {
     gesture = { ...rotation, id: event.pointerId };
   } else if (activeTool === "select") {
@@ -902,6 +1026,7 @@ function startPointer(event) {
     const freehand = activeTool === "brush" || activeTool === "marker";
     const weight = strokeWeights[strokeKind(activeTool)];
     draft = freehand ? createStroke(activeTool, point, color, weight) : createObject(activeTool, point, color);
+    if (hasLineStyle(draft)) draft.lineStyle = lineStyle;
     if (isFillable(draft)) setShapeFill(draft);
     if (!freehand) {
       draft.weight = weight;
@@ -943,6 +1068,9 @@ function movePointer(event) {
     case "resize":
       resizeSelection(point, primaryModifier(event));
       break;
+    case "endpoint":
+      moveEndpoint(point);
+      break;
     case "rotate":
       updateRotation(point, primaryModifier(event));
       break;
@@ -970,6 +1098,7 @@ function cancelGesture() {
     for (const { object, ...transform } of gesture.transforms) Object.assign(object, transform);
   }
   if (gesture?.kind === "crop") crop = gesture.original;
+  if (gesture?.kind === "endpoint") restoreEndpoint(gesture);
   gesture = null;
   draft = null;
 }
@@ -1019,7 +1148,7 @@ function finishPointer(event, cancelled) {
             containsPoint(bounds, { x: area.right, y: area.bottom });
         }));
       }
-      if (kind === "move" || kind === "resize" || kind === "rotate") commitSceneEdit();
+      if (kind === "move" || kind === "resize" || kind === "rotate" || kind === "endpoint") commitSceneEdit();
       if (kind === "pan") persistScene();
     }
   }
@@ -1211,7 +1340,7 @@ function undoEdit() {
   crop = null;
   sceneGeneration++;
   closePalette();
-  closeStrokePopup();
+  closeSettingsPopup();
   setExportOptions(null);
   const { entries, beforeClear } = undoHistory.pop();
   const previousSelection = new Set(selection);
@@ -1226,6 +1355,7 @@ function undoEdit() {
     Object.assign(view, beforeClear.view);
     ({ color, backgroundColor, fillEnabled, fillTransparency } = beforeClear.colors);
     Object.assign(strokeWeights, beforeClear.strokeWeights);
+    lineStyle = beforeClear.lineStyle;
   }
   if (!objects.length) activeTool = "brush";
   setSelection(objects.filter(object => previousSelection.has(object)));
@@ -1250,6 +1380,7 @@ function persistScene() {
     fillEnabled,
     fillTransparency,
     strokeWeights: { ...strokeWeights },
+    lineStyle,
   }).catch(() => announce("saveError"));
 }
 
@@ -1266,6 +1397,7 @@ async function restoreScene() {
       fillEnabled = saved.fillEnabled ?? fillEnabled;
       fillTransparency = saved.fillTransparency ?? fillTransparency;
       Object.assign(strokeWeights, saved.strokeWeights);
+      lineStyle = saved.lineStyle ?? lineStyle;
     }
     database = storage;
   } catch {
@@ -1288,6 +1420,7 @@ clearDialog.addEventListener("close", () => {
     view: { ...view },
     colors: { color, backgroundColor, fillEnabled, fillTransparency },
     strokeWeights: { ...strokeWeights },
+    lineStyle,
   };
   crop = null;
   objects.length = 0;
@@ -1295,6 +1428,7 @@ clearDialog.addEventListener("close", () => {
   Object.assign(view, { x: 0, y: 0, zoom: 1 });
   ({ color, backgroundColor, fillEnabled, fillTransparency } = defaultColors);
   Object.assign(strokeWeights, defaultStrokeWeights);
+  lineStyle = "solid";
   activeTool = "brush";
   setSelection([]);
   commitSceneEdit(beforeClear);
@@ -1449,9 +1583,9 @@ function updateConstrainedGesture(event) {
 
 document.addEventListener("keydown", event => {
   if (event.defaultPrevented) return;
-  if (!strokePopup.hidden && event.key === "Escape") {
+  if (openSettings && event.key === "Escape") {
     event.preventDefault();
-    closeStrokePopup(true);
+    closeSettingsPopup(true);
     return;
   }
   if (paletteTarget && event.key === "Escape") {
@@ -1490,8 +1624,8 @@ document.addEventListener("keydown", event => {
 
 document.addEventListener("pointerdown", event => {
   if (paletteTarget && !palettePopup.contains(event.target) && !colorPair.contains(event.target)) closePalette();
-  if (!strokePopup.hidden && !strokePopup.contains(event.target) && !strokeButton.contains(event.target)) {
-    closeStrokePopup();
+  if (openSettings && !openSettings.popup.contains(event.target) && !openSettings.button.contains(event.target)) {
+    closeSettingsPopup();
   }
   if (pngAction && !exportOptions.contains(event.target) &&
     !Object.values(exportTriggers).some(button => button.contains(event.target))) {

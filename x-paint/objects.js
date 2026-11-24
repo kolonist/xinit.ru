@@ -76,6 +76,10 @@ function isFillable(object) {
   return object.type === "rect" || object.type === "circle";
 }
 
+function isSegment(object) {
+  return object?.type === "line" || object?.type === "arrow";
+}
+
 function createStroke(type, point, color, weight = type === "marker" ? defaultMarkerWeight : defaultStrokeWeight) {
   const object = createObject(type, point, color);
   object.weight = weight;
@@ -138,14 +142,16 @@ function setShapeEnd(object, end) {
     path.lineTo(end.x, end.y);
     if (object.type === "arrow") {
       const angle = Math.atan2(end.y, end.x);
-      const length = Math.min(Math.max(17, object.weight * 3), Math.hypot(end.x, end.y) * 0.45);
-      const tips = [angle - Math.PI / 6, angle + Math.PI / 6].map(direction => ({
+      const halfAngle = Math.PI / 9;
+      const length = Math.min(Math.max(20, object.weight * 3.5), Math.hypot(end.x, end.y) * 0.5);
+      const tips = [angle - halfAngle, angle + halfAngle].map(direction => ({
         x: end.x - Math.cos(direction) * length,
         y: end.y - Math.sin(direction) * length,
       }));
-      path.moveTo(tips[0].x, tips[0].y);
-      path.lineTo(end.x, end.y);
-      path.lineTo(tips[1].x, tips[1].y);
+      object.arrowhead = new Path2D();
+      object.arrowhead.moveTo(tips[0].x, tips[0].y);
+      object.arrowhead.lineTo(end.x, end.y);
+      object.arrowhead.lineTo(tips[1].x, tips[1].y);
       bounds = {
         left: Math.min(bounds.left, ...tips.map(tip => tip.x)),
         top: Math.min(bounds.top, ...tips.map(tip => tip.y)),
@@ -245,13 +251,22 @@ function drawObject(context, object) {
 }
 
 function drawStrokePath(context, object) {
-  context.lineWidth = object.weight;
+  const { weight, lineStyle, arrowhead } = object;
+  context.lineWidth = weight;
   context.lineCap = context.lineJoin = "round";
   if (object.points?.length === 1) {
     context.beginPath();
-    context.arc(0, 0, object.weight / 2, 0, Math.PI * 2);
+    context.arc(0, 0, weight / 2, 0, Math.PI * 2);
     context.fill();
-  } else context.stroke(object.path);
+    return;
+  }
+  if (lineStyle === "dashed") context.setLineDash([weight * 3, weight * 2.5]);
+  if (lineStyle === "dotted") context.setLineDash([0.01, weight * 2.65]);
+  context.stroke(object.path);
+  if (arrowhead) {
+    context.setLineDash([]);
+    context.stroke(arrowhead);
+  }
 }
 
 function objectContainsPoint(context, object, point, tolerance) {
@@ -265,7 +280,8 @@ function objectContainsPoint(context, object, point, tolerance) {
   context.lineCap = context.lineJoin = "round";
   const { x, y } = local;
   const hit = (object.fill && object.fillTransparency !== 100 && context.isPointInPath(object.path, x, y)) ||
-    context.isPointInStroke(object.path, x, y);
+    context.isPointInStroke(object.path, x, y) ||
+    (object.arrowhead && context.isPointInStroke(object.arrowhead, x, y));
   context.restore();
   return hit;
 }

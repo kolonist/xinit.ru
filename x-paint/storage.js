@@ -29,8 +29,9 @@ function savePaintScene(database, scene) {
 
 function savePaintObject(object) {
   const { type, x, y, scaleX, scaleY, color, fill, fillTransparency, end, points, text, blob, source, groupId } = object;
-  const { angle, shear, weight } = object;
-  return { type, x, y, scaleX, scaleY, color, fill, fillTransparency, end, points, text, blob, source, groupId, angle, shear, weight };
+  const { angle, shear, weight, lineStyle } = object;
+  return { type, x, y, scaleX, scaleY, color, fill, fillTransparency, end, points, text, blob, source,
+    groupId, angle, shear, weight, lineStyle };
 }
 
 async function restorePaintObject(saved, context) {
@@ -40,6 +41,7 @@ async function restorePaintObject(saved, context) {
     case "brush":
     case "marker":
       object = createStroke(type, { x, y }, color, saved.weight);
+      if (type === "brush") object.lineStyle = saved.lineStyle ?? "solid";
       for (const point of points.slice(1)) appendStrokePoint(object, point);
       break;
     case "rect":
@@ -47,6 +49,7 @@ async function restorePaintObject(saved, context) {
     case "line":
     case "arrow":
       object.weight = saved.weight;
+      object.lineStyle = saved.lineStyle ?? "solid";
       setShapeEnd(object, end);
       if (fill) {
         object.fill = fill;

@@ -216,6 +216,44 @@
   font-size: 0.8rem;
 }
 
+.line-style-option {
+  display: grid;
+  grid-template-columns: auto 1fr 3rem;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid transparent;
+  color: var(--accent);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.line-style-option:hover,
+.line-style-option:has(input:checked) {
+  border-color: var(--border);
+  background: #0b2139;
+}
+
+.line-style-option input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.line-style-option svg {
+  width: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 2.5;
+}
+
+.line-style-mixed {
+  margin: 0 0.55rem 0.3rem;
+  color: var(--accent);
+  font-size: 0.72rem;
+}
+
 .paint-slider input {
   grid-column: 1 / -1;
   width: 100%;
@@ -248,7 +286,11 @@
 
 #marker-weight + .stroke-sample::before { opacity: 0.36; }
 
-.stroke-tools { margin-top: 0.65rem; }
+.stroke-tools {
+  display: grid;
+  gap: 0.28rem;
+  margin-top: 0.65rem;
+}
 
 .stroke-tools .tool-button {
   display: flex;
@@ -259,6 +301,9 @@
 }
 
 .stroke-tools .tool-button[aria-expanded="true"] { border-color: var(--accent); }
+
+.stroke-tools [data-line-style="dashed"] path { stroke-dasharray: 3 4.5; }
+.stroke-tools [data-line-style="dotted"] path { stroke-dasharray: 0.01 4.5; }
 
 #clear-dialog {
   position: fixed;

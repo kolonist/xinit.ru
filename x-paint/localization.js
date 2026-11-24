@@ -13,6 +13,12 @@ const paintTranslations = {
   noFill: ["Без заливки", "No fill"],
   fillTransparency: ["Прозрачность", "Transparency"],
   strokeWidth: ["Толщина", "Width"],
+  lineStyle: ["Тип линии", "Line style"],
+  lineStyleMixed: ["Разные стили", "Mixed styles"],
+  lineStyleSolid: ["Сплошная", "Solid"],
+  lineStyleDashed: ["Пунктирная", "Dashed"],
+  lineStyleDashCaption: ["Пунктир", "Dashed"],
+  lineStyleDotted: ["Точечная", "Dotted"],
   strokeWeight: ["Линии и контуры", "Lines and outlines"],
   markerWeight: ["Выделитель", "Highlighter"],
   swapColors: ["Поменять цвета местами", "Swap colors"],
@@ -89,6 +95,7 @@ const paintTranslations = {
   ],
   touchDrawHint: ["Два пальца для зума и перемещения", "Two fingers to zoom and pan"],
   selectHint: ["Круглая ручка — поворот · углы — размер", "Round handle to rotate · corners to resize"],
+  endpointsHint: ["Перетащите ручку, чтобы переместить начало или конец", "Drag either handle to move that endpoint"],
   marqueeHint: ["Потяните из свободного места для выделения рамкой", "Drag from an empty spot to select with a box"],
   clickSelectionHint: ["Выделение рамкой · {modifier} + клик меняет выделение", "Drag to select · {modifier} + click to toggle"],
   resizeHint: [
@@ -114,6 +121,7 @@ const paintTranslations = {
 const paintIcons = {
   select: '<path d="m4 3 14 9-7 1-3 7z"/>',
   strokeWidth: '<path d="M4 6h16"/><path d="M4 12h16" stroke-width="2.4"/><path d="M4 18h16" stroke-width="3.4"/>',
+  lineStyle: '<path d="M3 12h18" stroke-width="2.2"/>',
   pan: '<path d="M7 12V6a1.5 1.5 0 0 1 3 0v4-6a1.5 1.5 0 0 1 3 0v6-5a1.5 1.5 0 0 1 3 0v6-3a1.5 1.5 0 0 1 3 0v6a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-3l-3-5a1.5 1.5 0 0 1 2-2z"/>',
   brush: '<path d="m11 13 7-9a1.5 1.5 0 0 1 2 2l-7 9m-1-1c-2-2-5-1-6 1s0 3-3 5c5 1 10-1 9-6z"/>',
   marker: '<path d="m6 14 9-10 5 5-10 9-4-4zm0 0-3 5 3 2 4-3m2 3h9"/>',
