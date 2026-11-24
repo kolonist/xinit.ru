@@ -86,10 +86,9 @@
 #drawing {
   touch-action: none;
   cursor: crosshair;
+  outline: none;
 }
 
-#drawing:focus-visible { outline-offset: -3px; }
-#drawing[data-pointer-focus]:focus { outline: none; }
 #drawing[data-tool="select"] { cursor: default; }
 #drawing[data-tool="pan"] { cursor: grab; }
 #drawing[data-tool="text"] { cursor: text; }

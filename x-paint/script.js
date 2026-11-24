@@ -1165,7 +1165,6 @@ function startPointer(event) {
   finishTextEdit(true);
   const screen = screenPoint(event);
   const point = worldPoint(screen);
-  canvas.setAttribute("data-pointer-focus", "");
   canvas.focus({ preventScroll: true });
   canvas.setPointerCapture(event.pointerId);
   pointers.set(event.pointerId, screen);
@@ -1910,7 +1909,6 @@ function downloadPaintBlob(blob, name) {
 }
 
 canvas.addEventListener("pointerdown", startPointer);
-canvas.addEventListener("blur", () => canvas.removeAttribute("data-pointer-focus"));
 canvas.addEventListener("pointermove", event => {
   if (event.pointerType !== "touch") {
     canvasPointer = { clientX: event.clientX, clientY: event.clientY };
@@ -1947,8 +1945,6 @@ canvas.addEventListener("dblclick", event => {
 
 canvas.addEventListener("keydown", event => {
   const { key } = event;
-  if (key === "Meta" || key === "Control") return;
-  canvas.removeAttribute("data-pointer-focus");
   if (key === "Escape") {
     cancelGesture();
     if (crop) finishCrop(false);
