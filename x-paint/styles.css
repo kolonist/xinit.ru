@@ -2,6 +2,13 @@
   --paint-inset: 0.65rem;
   height: 100vh;
   height: 100dvh;
+  background: #061424;
+}
+
+.paint-page .site-bar {
+  background: #07182e;
+  box-shadow: 0 1px 0 #041a31;
+  backdrop-filter: none;
 }
 
 .paint-page .top-menu {
@@ -24,7 +31,7 @@
   padding: 0.7rem;
   overflow: auto;
   border: 1px solid var(--border);
-  background: linear-gradient(155deg, #102b45, #061424 60%), var(--panel);
+  background: #08192b;
   box-shadow: inset 0 1px #59c9ff45;
 }
 
@@ -40,6 +47,7 @@
 .paint-sidebar .wordmark-cursor {
   width: 0.65em;
   height: 0.15em;
+  animation: none;
 }
 
 .tool-grid {
@@ -55,6 +63,11 @@
   padding: 0;
   overflow: hidden;
   isolation: isolate;
+  /* Pre-render the shared grid and glow for browsers using software compositing. */
+  background:
+    url("canvas-grid.png") center / var(--preview-grid-major-step) var(--preview-grid-major-step) repeat,
+    url("canvas-glow.png") center / 100% 100% no-repeat var(--preview-edge);
+  box-shadow: 0 1px #8ddfff12;
 }
 
 .paint-stage::before, .paint-stage::after { z-index: 1; }
@@ -105,8 +118,8 @@
   max-width: 100%;
   padding: 0.25rem;
   border: 1px solid var(--border);
-  background: #07182ef5;
-  box-shadow: 0 4px 16px #020a1580, inset 0 1px #63d6ff2b;
+  background: #07182e;
+  box-shadow: 0 2px #020a1580, inset 0 1px #63d6ff2b;
   pointer-events: auto;
 }
 
