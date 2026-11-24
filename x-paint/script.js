@@ -90,7 +90,7 @@ let frame = 0;
 let renderedView = null;
 let sceneDirty = true;
 let markerPreview = null;
-let overlayVisible = false;
+let overlayRegions = [];
 let viewPreviewTimer;
 let viewSaveTimer;
 const objectClipboardType = "application/x-x-paint-objects";
@@ -617,6 +617,7 @@ function draw(now) {
   if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
     canvas.width = pixelWidth;
     canvas.height = pixelHeight;
+    overlayRegions = [];
     sceneDirty = true;
   }
 
@@ -652,18 +653,42 @@ function draw(now) {
     if (laserPoints.length) requestDraw();
     else updateControls();
   }
-  if (overlayVisible) context.clearRect(0, 0, canvas.width, canvas.height);
-  overlayVisible = Boolean(showDraft || showSelection || showMarquee || laserPoints.length);
-  if (overlayVisible) {
+  // The overlay is transparent outside the regions painted in the previous frame.
+  for (const { left, top, right, bottom } of overlayRegions) {
+    context.clearRect(left, top, right - left, bottom - top);
+  }
+  overlayRegions = [];
+  if (showDraft || showSelection || showMarquee || laserPoints.length) {
+    const bounds = [];
     context.save();
     setViewTransform(context, pixelRatio);
-    if (showDraft) drawObject(context, draft);
-    if (showSelection) drawSelection();
-    if (showMarquee) drawMarquee(gesture.bounds);
-    if (laserPoints.length) drawLaser(now);
+    if (showDraft) {
+      drawObject(context, draft);
+      bounds.push(worldBounds(draft));
+    }
+    if (showSelection) bounds.push(...drawSelection());
+    if (showMarquee) {
+      drawMarquee(gesture.bounds);
+      bounds.push(padBounds(gesture.bounds, 1 / view.zoom));
+    }
+    if (laserPoints.length) bounds.push(drawLaser(now));
     context.restore();
+    overlayRegions = overlayPixelRegions(bounds, pixelRatio);
   }
   if (textEdit) positionTextEditor();
+}
+
+function overlayPixelRegions(regions, pixelRatio) {
+  const scale = view.zoom * pixelRatio;
+  const x = view.x * pixelRatio;
+  const y = view.y * pixelRatio;
+  const antialiasPadding = 2;
+  return regions.map(({ left, top, right, bottom }) => ({
+    left: Math.max(0, Math.floor(left * scale + x) - antialiasPadding),
+    top: Math.max(0, Math.floor(top * scale + y) - antialiasPadding),
+    right: Math.min(canvas.width, Math.ceil(right * scale + x) + antialiasPadding),
+    bottom: Math.min(canvas.height, Math.ceil(bottom * scale + y) + antialiasPadding),
+  })).filter(({ left, top, right, bottom }) => left < right && top < bottom);
 }
 
 function corners(bounds) {
@@ -677,10 +702,7 @@ function corners(bounds) {
 
 function drawSelection() {
   const segment = selectedSegment();
-  if (segment) {
-    drawEndpoints(segment);
-    return;
-  }
+  if (segment) return drawEndpoints(segment);
   const image = crop ? singleSelection() : null;
   const frame = image || selectionFrame();
   const bounds = crop || frame.bounds;
@@ -720,6 +742,9 @@ function drawSelection() {
     context.stroke();
   }
   context.restore();
+  const paintedBounds = image ? image.bounds : { ...bounds, top: rotationHandle(bounds).y };
+  const paintedFrame = { ...frame, bounds: paintedBounds };
+  return [padBounds(worldBounds(paintedFrame), 6 * unit)];
 }
 
 function segmentEndpoints(object) {
@@ -728,17 +753,19 @@ function segmentEndpoints(object) {
 
 function drawEndpoints(object) {
   const unit = 1 / view.zoom;
+  const points = segmentEndpoints(object);
   context.save();
   context.strokeStyle = "#9ceaff";
   context.fillStyle = "#061324";
   context.lineWidth = unit;
-  for (const { x, y } of segmentEndpoints(object)) {
+  for (const { x, y } of points) {
     context.beginPath();
     context.arc(x, y, 5 * unit, 0, Math.PI * 2);
     context.fill();
     context.stroke();
   }
   context.restore();
+  return points.map(point => padBounds(rectangleBetween(point, point), 6 * unit));
 }
 
 function traceCorners([first, ...rest]) {
@@ -760,6 +787,7 @@ function drawMarquee({ left, top, right, bottom }) {
 }
 
 function drawLaser(now) {
+  const bounds = rectangleBetween(laserPoints[0], laserPoints[0]);
   context.save();
   context.lineCap = "round";
   context.lineWidth = 4 / view.zoom;
@@ -776,8 +804,13 @@ function drawLaser(now) {
     }
     context.lineTo(point.x, point.y);
     context.stroke();
+    bounds.left = Math.min(bounds.left, point.x);
+    bounds.top = Math.min(bounds.top, point.y);
+    bounds.right = Math.max(bounds.right, point.x);
+    bounds.bottom = Math.max(bounds.bottom, point.y);
   });
   context.restore();
+  return padBounds(bounds, 32 / view.zoom);
 }
 
 function screenPoint(event) {
