@@ -199,16 +199,14 @@ function measureTextObject(context, object) {
   };
 }
 
-function createImageObject(image, blob, center, scale) {
+function createImageObject(image, blob, center) {
   const width = image.naturalWidth;
   const height = image.naturalHeight;
-  const object = createObject("image", { x: center.x - width * scale / 2, y: center.y - height * scale / 2 });
+  const object = createObject("image", { x: center.x - width / 2, y: center.y - height / 2 });
   object.image = image;
   object.blob = blob;
   object.source = { x: 0, y: 0, width, height };
   object.bounds = { left: 0, top: 0, right: width, bottom: height };
-  object.scaleX = scale;
-  object.scaleY = scale;
   return object;
 }
 

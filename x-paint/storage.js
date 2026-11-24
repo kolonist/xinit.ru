@@ -9,21 +9,72 @@ function openPaintStorage() {
   });
 }
 
-function readPaintScene(database) {
+function readPaintScene(database, key) {
   return new Promise((resolve, reject) => {
-    const request = database.transaction("drawings").objectStore("drawings").get("current");
+    const request = database.transaction("drawings").objectStore("drawings").get(key);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
-function savePaintScene(database, scene) {
+function savePaintScene(database, scene, key) {
   return new Promise((resolve, reject) => {
     const transaction = database.transaction("drawings", "readwrite");
     transaction.oncomplete = resolve;
     transaction.onabort = () => reject(transaction.error);
-    transaction.objectStore("drawings").put(scene, "current");
+    transaction.objectStore("drawings").put(scene, key);
     transaction.commit?.();
+  });
+}
+
+function deletePaintScene(database, key) {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction("drawings", "readwrite");
+    transaction.oncomplete = resolve;
+    transaction.onabort = () => reject(transaction.error);
+    transaction.objectStore("drawings").delete(key);
+    transaction.commit?.();
+  });
+}
+
+function paintDrawingKey(id) {
+  return `project:${id}`;
+}
+
+function readLegacyPaintWorkspace() {
+  let key = history.state?.paintWorkspace;
+  try {
+    key ??= sessionStorage.getItem("xinit-paint-open-project");
+  } catch {
+    // The previous entry may still identify the project.
+  }
+  return typeof key === "string" && /^project:\d+(?:-\d+){3}$/.test(key) ? key : null;
+}
+
+function forgetLegacyPaintWorkspace() {
+  try {
+    sessionStorage.removeItem("xinit-paint-open-project");
+  } catch {
+    // Session storage may be unavailable.
+  }
+}
+
+function migratePaintScene(database, key) {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction("drawings", "readwrite");
+    const store = transaction.objectStore("drawings");
+    let result;
+    transaction.oncomplete = () => resolve(result);
+    transaction.onabort = () => reject(transaction.error);
+    const request = store.get(key);
+    request.onsuccess = () => {
+      const saved = request.result;
+      if (!saved || (key === "current" && !saved.objects.length)) return;
+      const id = crypto.randomUUID();
+      store.put(saved, paintDrawingKey(id));
+      store.delete(key);
+      result = { id, scene: saved };
+    };
   });
 }
 

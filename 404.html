@@ -3,11 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="0; url=https://xinit.ru/">
   <meta name="robots" content="noindex">
   <link rel="canonical" href="https://xinit.ru/">
   <title>Переход на xinit.ru</title>
-  <script>window.location.replace('https://xinit.ru/');</script>
+  <script src="/x-paint/routes.js"></script>
+  <script>
+    const drawingId = typeof paintDrawingIdFromPath === "function" && paintDrawingIdFromPath(location.pathname);
+    if (drawingId) {
+      const url = new URL(paintPagePath, location.origin);
+      url.search = location.search;
+      url.searchParams.set(paintDrawingParameter, drawingId);
+      url.hash = location.hash;
+      location.replace(url);
+    } else {
+      location.replace("https://xinit.ru/");
+    }
+  </script>
+  <noscript><meta http-equiv="refresh" content="0; url=https://xinit.ru/"></noscript>
 </head>
 <body></body>
 </html>

@@ -11,15 +11,17 @@ const mousePanHint = document.querySelector("#mouse-pan-hint");
 const feedback = document.querySelector(".paint-feedback");
 const hintRow = document.querySelector(".paint-hints");
 const status = document.querySelector("#status");
+const shareLink = document.querySelector("#share-link");
+const shareDownload = document.querySelector("#share-download");
 const app = document.querySelector(".paint-app");
 const selectionActions = document.querySelector("#selection-actions");
 const cropActions = document.querySelector("#crop-actions");
-const fileInput = document.querySelector("#image-file");
+const fileInput = document.querySelector("#paint-file");
 const textContent = document.querySelector("#text-content");
 const textActions = document.querySelector("#text-actions");
 const exportOptions = document.querySelector("#export-options");
-const exportVisible = document.querySelector("#export-visible");
-const exportAll = document.querySelector("#export-all");
+const exportButtons = [...exportOptions.querySelectorAll("button")];
+const fullExportButtons = exportButtons.filter(button => button.hasAttribute("data-full"));
 const palettePopup = document.querySelector("#palette-popup");
 const strokePopup = document.querySelector("#stroke-popup");
 const lineStylePopup = document.querySelector("#line-style-popup");
@@ -37,6 +39,7 @@ const transparencyInput = document.querySelector("#fill-transparency");
 const transparencyValue = document.querySelector("#fill-transparency-value");
 const transparencyControls = transparencyInput.closest(".fill-transparency");
 const clearDialog = document.querySelector("#clear-dialog");
+const shareLimitDialog = document.querySelector("#share-limit-dialog");
 const touchLayout = window.matchMedia("(pointer: coarse)");
 const appleKeyboard = /^(Mac|iP)/i.test(navigator.userAgentData?.platform || navigator.platform);
 const modifierKey = appleKeyboard ? "Meta" : "Control";
@@ -78,6 +81,10 @@ let lineStyle = "solid";
 let paletteTarget = null;
 let openSettings = null;
 let database;
+let drawingId = null;
+let saveRevision = 0;
+let projectDirty = false;
+let preparingShare = false;
 let sceneGeneration = 0;
 let crop = null;
 let gesture = null;
@@ -97,7 +104,6 @@ const objectClipboardType = "application/x-x-paint-objects";
 let localClipboardObjects = null;
 let localClipboardImage = null;
 let canvasPointer = null;
-let pngAction = null;
 
 function label(key) {
   return paintTranslations[key][language === "ru" ? 0 : 1].replace("{modifier}", modifierLabel);
@@ -107,24 +113,32 @@ function primaryModifier(event) {
   return appleKeyboard ? event.metaKey : event.ctrlKey;
 }
 
+function paintIconMarkup(icon) {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paintIcons[icon]}</svg>`;
+}
+
 function addButton(group, key, onClick, icon = key) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "tool-button";
   button.dataset.i18nLabel = key;
   button.dataset.i18nTitle = key;
-  if (paintIcons[icon]) {
-    button.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paintIcons[icon]}</svg>`;
-  }
+  if (paintIcons[icon]) button.innerHTML = paintIconMarkup(icon);
   button.addEventListener("click", onClick);
   group.append(button);
   return button;
 }
 
 const drawingTools = document.querySelector("#drawing-tools");
-for (const name of ["select", "pan", "brush", "marker", "line", "arrow", "rect", "circle", "text"]) {
-  toolButtons.set(name, addButton(drawingTools, name, () => setTool(name)));
+const toolShortcuts = new Map([
+  ["KeyM", "select"], ["KeyH", "pan"], ["KeyB", "brush"], ["KeyS", "marker"],
+  ["KeyL", "line"], ["KeyA", "arrow"], ["KeyR", "rect"], ["KeyC", "circle"], ["KeyT", "text"],
+]);
+for (const [code, tool] of toolShortcuts) {
+  const button = addButton(drawingTools, tool, () => setTool(tool));
+  button.setAttribute("aria-keyshortcuts", code.slice(3));
+  toolButtons.set(tool, button);
 }
 
 const colorPair = document.querySelector("#color-pair");
@@ -213,22 +227,34 @@ for (const { kind, input } of strokeSliders) {
 
 const actions = document.querySelector("#actions");
 const undoButton = addButton(actions, "undo", undoEdit);
-const copyButton = addButton(actions, "copy", () => showExportOptions("copy"));
-addButton(actions, "paste", pasteImage);
-addButton(actions, "image", () => fileInput.click());
-const downloadButton = addButton(actions, "download", () => showExportOptions("download"));
-const exportTriggers = { copy: copyButton, download: downloadButton };
-for (const button of Object.values(exportTriggers)) {
-  button.setAttribute("aria-controls", exportOptions.id);
-  button.setAttribute("aria-expanded", "false");
-}
-toolButtons.set("laser", addButton(actions, "laser", () => setTool("laser")));
+const exportButton = addButton(actions, "exportPng", toggleExportOptions, "download");
+exportButton.setAttribute("aria-controls", exportOptions.id);
+exportButton.setAttribute("aria-expanded", "false");
+const saveProjectButton = addButton(actions, "saveProject", saveProjectFile);
+saveProjectButton.setAttribute("aria-keyshortcuts", `${modifierKey}+S`);
+const shareButton = addButton(actions, "share", sharePaintScene);
+const shareButtonIcon = shareButton.querySelector("svg");
+const openFileButton = addButton(actions, "openFile", () => fileInput.click());
+openFileButton.setAttribute("aria-keyshortcuts", `${modifierKey}+O`);
+const pasteButton = addButton(actions, "paste", pasteImage);
+pasteButton.setAttribute("aria-keyshortcuts", `${modifierKey}+V`);
+const laserButton = addButton(actions, "laser", () => setTool("laser"));
+laserButton.setAttribute("aria-keyshortcuts", "P");
+toolButtons.set("laser", laserButton);
+toolShortcuts.set("KeyP", "laser");
 const clearButton = addButton(actions, "clear", () => {
   clearDialog.returnValue = "";
   clearDialog.showModal();
+}, "remove");
+
+document.querySelector("#share-limit-save").addEventListener("click", () => {
+  shareLimitDialog.close();
+  saveProjectFile();
 });
-exportVisible.addEventListener("click", () => exportImage(false));
-exportAll.addEventListener("click", () => exportImage(true));
+for (const button of exportButtons) {
+  button.querySelector(".export-command").insertAdjacentHTML("afterbegin", paintIconMarkup(button.dataset.export));
+  button.addEventListener("click", () => exportImage(button.dataset.export, button.hasAttribute("data-full")));
+}
 
 const editButton = addButton(selectionActions, "edit", () => openTextEditor(singleSelection()));
 const cropButton = addButton(selectionActions, "crop", () => {
@@ -483,7 +509,9 @@ function updateControls() {
   lineStyleCaption.textContent = styleName;
   lineStyleButton.setAttribute("aria-label", styleButtonName);
   lineStyleButton.title = styleButtonName;
-  exportAll.disabled = clearButton.disabled = objects.length === 0 && !textEdit;
+  const empty = objects.length === 0 && !textEdit;
+  for (const button of fullExportButtons) button.disabled = empty;
+  clearButton.disabled = empty && !drawingId;
   undoButton.disabled = undoHistory.length === 0;
   const object = singleSelection();
   selectionActions.hidden = !selection.size || Boolean(crop || textEdit);
@@ -522,10 +550,17 @@ function updateZoomControls() {
   zoomInButton.disabled = view.zoom >= 8;
 }
 
-function announce(key) {
+function announce(key = "", persistent = false) {
   clearTimeout(statusTimeout);
+  if (shareDownload.hasAttribute("href")) {
+    URL.revokeObjectURL(shareDownload.href);
+    shareDownload.removeAttribute("href");
+    shareDownload.hidden = true;
+  }
+  shareLink.hidden = true;
   statusKey = key;
-  status.textContent = label(key);
+  status.textContent = key ? label(key) : "";
+  if (!key || persistent) return;
   statusTimeout = setTimeout(() => {
     statusKey = "";
     status.textContent = "";
@@ -1344,11 +1379,15 @@ function positionTextEditor() {
   textContent.style.transform = `matrix(${a}, ${b}, ${c}, ${d}, 0, 0)`;
 }
 
+function closeTextEditor() {
+  textEdit = null;
+  textContent.hidden = true;
+}
+
 function finishTextEdit(apply, focusCanvas = false) {
   if (!textEdit) return;
   const { object, isNew } = textEdit;
-  textEdit = null;
-  textContent.hidden = true;
+  closeTextEditor();
   const text = textContent.value;
   if (apply && text.trim()) {
     object.text = text;
@@ -1432,9 +1471,7 @@ async function importImage(blob, point = worldPoint(viewCenter())) {
   try {
     const image = await decodePaintImage(blob);
     if (generation !== sceneGeneration) return;
-    const scale = Math.min(1, canvas.clientWidth * 0.72 / image.naturalWidth,
-      canvas.clientHeight * 0.63 / image.naturalHeight) / view.zoom;
-    insertObjects([createImageObject(image, blob, point, scale)]);
+    insertObjects([createImageObject(image, blob, point)]);
   } catch {
     if (generation === sceneGeneration) announce("imageError");
   }
@@ -1501,10 +1538,10 @@ function snapshotDrawing() {
   });
 }
 
-function commitSceneEdit(beforeClear = null) {
+function commitSceneEdit() {
   const edited = snapshotDrawing();
   if (edited.length !== committedObjects.length || edited.some((entry, index) => entry !== committedObjects[index])) {
-    undoHistory.push({ entries: committedObjects, beforeClear });
+    undoHistory.push(committedObjects);
     if (undoHistory.length > undoLimit) undoHistory.shift();
     committedObjects = edited;
     undoButton.disabled = false;
@@ -1521,8 +1558,8 @@ function undoEdit() {
   sceneGeneration++;
   closePalette();
   closeSettingsPopup();
-  setExportOptions(null);
-  const { entries, beforeClear } = undoHistory.pop();
+  setExportOptions(false);
+  const entries = undoHistory.pop();
   const previousSelection = new Set(selection);
   objects.length = 0;
   for (const { object, state } of entries) {
@@ -1531,12 +1568,6 @@ function undoEdit() {
     objects.push(object);
   }
   committedObjects = entries;
-  if (beforeClear) {
-    Object.assign(view, beforeClear.view);
-    ({ color, backgroundColor, fillEnabled, fillTransparency } = beforeClear.colors);
-    Object.assign(strokeWeights, beforeClear.strokeWeights);
-    lineStyle = beforeClear.lineStyle;
-  }
   if (!objects.length) activeTool = "brush";
   setSelection(objects.filter(object => previousSelection.has(object)));
   requestSceneDraw();
@@ -1545,17 +1576,14 @@ function undoEdit() {
   announce("undone");
 }
 
-function persistScene() {
-  clearTimeout(viewSaveTimer);
-  viewSaveTimer = undefined;
-  if (!database) return;
+function currentPaintScene() {
   const savedObjects = objects.map(savePaintObject);
   if (textEdit && textContent.value.trim()) {
     const savedText = savePaintObject({ ...textEdit.object, text: textContent.value });
     if (textEdit.isNew) savedObjects.push(savedText);
     else savedObjects[objects.indexOf(textEdit.object)] = savedText;
   }
-  savePaintScene(database, {
+  return {
     objects: savedObjects,
     view: { ...view },
     color,
@@ -1564,84 +1592,292 @@ function persistScene() {
     fillTransparency,
     strokeWeights: { ...strokeWeights },
     lineStyle,
-  }).catch(() => announce("saveError"));
+  };
+}
+
+function persistScene() {
+  clearTimeout(viewSaveTimer);
+  viewSaveTimer = undefined;
+  const scene = currentPaintScene();
+  if (!drawingId) {
+    if (!scene.objects.length) return;
+    drawingId = crypto.randomUUID();
+    replacePaintDrawingPath(drawingId);
+  }
+  if (!database) {
+    setProjectDirty(true);
+    return;
+  }
+  const revision = ++saveRevision;
+  savePaintScene(database, scene, paintDrawingKey(drawingId)).then(() => {
+    if (revision === saveRevision) setProjectDirty(false);
+  }).catch(() => {
+    if (revision !== saveRevision) return;
+    setProjectDirty(true);
+    announce("saveError");
+  });
+}
+
+function applyPaintScene(saved, restored) {
+  sceneGeneration++;
+  saveRevision++;
+  clearTimeout(viewSaveTimer);
+  viewSaveTimer = undefined;
+  objects.length = 0;
+  for (const object of restored) objects.push(object);
+  Object.assign(view, saved.view);
+  color = saved.color ?? defaultColors.color;
+  backgroundColor = saved.backgroundColor ?? defaultColors.backgroundColor;
+  fillEnabled = saved.fillEnabled ?? defaultColors.fillEnabled;
+  fillTransparency = saved.fillTransparency ?? defaultColors.fillTransparency;
+  Object.assign(strokeWeights, defaultStrokeWeights, saved.strokeWeights);
+  lineStyle = saved.lineStyle ?? "solid";
+  setProjectDirty(false);
+  undoHistory.length = 0;
+  committedObjects = snapshotDrawing();
+  activeTool = objects.length ? "select" : "brush";
+  updateControls();
+  requestSceneDraw();
+}
+
+function replacePaintDrawingPath(id) {
+  const url = new URL(location.href);
+  url.searchParams.delete(paintDrawingParameter);
+  if (url.protocol === "file:") {
+    if (id) url.searchParams.set(paintDrawingParameter, id);
+  } else {
+    url.pathname = id ? paintPagePath + id : paintPagePath;
+  }
+  if (url.hash.startsWith(paintSharePrefix)) url.hash = "";
+  history.replaceState(null, "", url);
 }
 
 async function restoreScene() {
   try {
-    const storage = await openPaintStorage();
-    const saved = await readPaintScene(storage);
+    try {
+      database = await openPaintStorage();
+    } catch {
+      // A link or a file can still be opened without IndexedDB.
+    }
+    const hash = location.hash;
+    const requestedId = paintDrawingIdFromPath(location.pathname) ??
+      validatePaintDrawingId(new URLSearchParams(location.search).get(paintDrawingParameter));
+    const fromLink = hash.startsWith(paintSharePrefix);
+    if (fromLink && await openProjectCopy(readPaintShare(hash))) return;
+    drawingId = requestedId;
+    if (drawingId) replacePaintDrawingPath(drawingId);
+    if (!database) {
+      if (!fromLink) announce("restoreError");
+      return;
+    }
+    let saved;
+    if (drawingId) {
+      saved = await readPaintScene(database, paintDrawingKey(drawingId));
+    } else {
+      const legacyKey = readLegacyPaintWorkspace();
+      const legacyCopy = legacyKey ? await migratePaintScene(database, legacyKey) : null;
+      const migrated = legacyCopy ?? await migratePaintScene(database, "current");
+      if (migrated) {
+        drawingId = migrated.id;
+        replacePaintDrawingPath(drawingId);
+        saved = migrated.scene;
+      }
+      forgetLegacyPaintWorkspace();
+    }
     if (saved) {
       const restored = await Promise.all(saved.objects.map(object => restorePaintObject(object, context)));
-      for (const object of restored) objects.push(object);
-      Object.assign(view, saved.view);
-      color = saved.color ?? color;
-      backgroundColor = saved.backgroundColor ?? backgroundColor;
-      fillEnabled = saved.fillEnabled ?? fillEnabled;
-      fillTransparency = saved.fillTransparency ?? fillTransparency;
-      Object.assign(strokeWeights, saved.strokeWeights);
-      lineStyle = saved.lineStyle ?? lineStyle;
+      applyPaintScene(saved, restored);
     }
-    database = storage;
   } catch {
     announce("restoreError");
   } finally {
-    committedObjects = snapshotDrawing();
-    activeTool = objects.length ? "select" : "brush";
     app.inert = false;
     updateControls();
     requestSceneDraw();
   }
 }
 
-clearDialog.addEventListener("close", () => {
+function warnUnsavedProject(event) {
+  event.preventDefault();
+  event.returnValue = true;
+}
+
+function setProjectDirty(dirty) {
+  if (dirty === projectDirty) return;
+  projectDirty = dirty;
+  if (dirty) window.addEventListener("beforeunload", warnUnsavedProject);
+  else window.removeEventListener("beforeunload", warnUnsavedProject);
+}
+
+async function openProjectCopy(project, fromFile = false) {
+  try {
+    const saved = await project;
+    const restored = await Promise.all(saved.objects.map(object => restorePaintObject(object, context)));
+    if (fromFile && projectDirty &&
+      !window.confirm(label("discardProject"))) return false;
+    if (viewSaveTimer !== undefined) persistScene();
+    finishTextEdit(!projectDirty);
+    cancelGesture();
+    crop = null;
+    laserPoints = [];
+    selection.clear();
+    setExportOptions(false);
+    let newId = null;
+    if (database) {
+      const id = crypto.randomUUID();
+      try {
+        await savePaintScene(database, saved, paintDrawingKey(id));
+        newId = id;
+      } catch {
+        // The decoded project is still usable in memory when storage fails.
+      }
+    }
+    drawingId = newId;
+    if (newId || fromFile) replacePaintDrawingPath(drawingId);
+    forgetLegacyPaintWorkspace();
+    applyPaintScene(saved, restored);
+    announce(newId ? "projectOpened" : "projectOpenedTemporary");
+    return true;
+  } catch {
+    announce(fromFile ? "projectOpenError" : "linkOpenError");
+    return false;
+  }
+}
+
+function startClipboardWrite(urlPromise) {
+  if (!navigator.clipboard?.write || !window.ClipboardItem) return Promise.resolve(false);
+  // Start the write in the click handler while compression prepares the clipboard item.
+  const text = urlPromise.then(url => {
+    if (!url) throw new Error("No share URL");
+    return new Blob([url], { type: "text/plain" });
+  });
+  text.catch(() => {});
+  try {
+    return navigator.clipboard.write([new ClipboardItem({ "text/plain": text })]).then(() => true, () => false);
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
+function paintFileName(extension) {
+  return `${drawingId ?? "x-paint"}.${extension}`;
+}
+
+function offerProjectDownload(scene, fileName) {
+  try {
+    const href = URL.createObjectURL(packPaintProject(scene));
+    announce("shareError", true);
+    shareDownload.href = href;
+    shareDownload.download = fileName;
+    shareDownload.hidden = false;
+  } catch {
+    announce("projectSaveError");
+  }
+}
+
+async function sharePaintScene() {
+  if (preparingShare || shareButton.getAttribute("aria-disabled") === "true") return;
+  preparingShare = true;
+  try {
+    finishTextEdit(true);
+    const scene = currentPaintScene();
+    const fileName = paintFileName("xpaint");
+    announce("preparingLink");
+    const urlPromise = Promise.resolve().then(() => makePaintShareUrl(scene));
+    const copied = startClipboardWrite(urlPromise);
+    let url;
+    try {
+      url = await urlPromise;
+    } catch {
+      offerProjectDownload(scene, fileName);
+      return;
+    }
+    if (!url) {
+      announce();
+      shareLimitDialog.showModal();
+      return;
+    }
+    try {
+      if (!await copied) await navigator.clipboard.writeText(url);
+      announce("linkCopied");
+      shareButton.setAttribute("aria-disabled", "true");
+      shareButtonIcon.innerHTML = paintIcons.check;
+      setTimeout(() => {
+        shareButtonIcon.innerHTML = paintIcons.share;
+        shareButton.removeAttribute("aria-disabled");
+      }, 1000);
+    } catch {
+      announce("copyLinkManually", true);
+      shareLink.value = url;
+      shareLink.hidden = false;
+      shareLink.focus({ preventScroll: true });
+      shareLink.select();
+    }
+  } finally {
+    preparingShare = false;
+  }
+}
+
+function saveProjectFile() {
+  try {
+    finishTextEdit(true);
+    if (viewSaveTimer !== undefined) persistScene();
+    const project = packPaintProject(currentPaintScene());
+    downloadPaintBlob(project, paintFileName("xpaint"));
+    setProjectDirty(false);
+    announce("projectSaved");
+  } catch {
+    announce("projectSaveError");
+  }
+}
+
+clearDialog.addEventListener("close", async () => {
   if (clearDialog.returnValue !== "clear") return;
+  app.inert = true;
   sceneGeneration++;
-  finishTextEdit(false);
   cancelGesture();
-  const beforeClear = {
-    view: { ...view },
-    colors: { color, backgroundColor, fillEnabled, fillTransparency },
-    strokeWeights: { ...strokeWeights },
-    lineStyle,
-  };
+  pointers.clear();
+  clearTimeout(viewSaveTimer);
+  viewSaveTimer = undefined;
+  try {
+    if (database && drawingId) await deletePaintScene(database, paintDrawingKey(drawingId));
+  } catch {
+    app.inert = false;
+    clearButton.focus({ preventScroll: true });
+    announce("clearError");
+    return;
+  }
+  closeTextEditor();
+  closePalette();
+  closeSettingsPopup();
   crop = null;
-  objects.length = 0;
   laserPoints.length = 0;
-  Object.assign(view, { x: 0, y: 0, zoom: 1 });
-  ({ color, backgroundColor, fillEnabled, fillTransparency } = defaultColors);
-  Object.assign(strokeWeights, defaultStrokeWeights);
-  lineStyle = "solid";
-  activeTool = "brush";
-  setSelection([]);
-  commitSceneEdit(beforeClear);
+  selection.clear();
+  setExportOptions(false);
+  drawingId = null;
+  replacePaintDrawingPath(null);
+  forgetLegacyPaintWorkspace();
+  applyPaintScene({ view: { x: 0, y: 0, zoom: 1 } }, []);
+  app.inert = false;
   canvas.focus({ preventScroll: true });
+  announce("cleared");
 });
 
-function setExportOptions(action) {
-  pngAction = action;
-  exportOptions.hidden = !action;
-  if (action) {
-    exportOptions.dataset.i18nLabel = action;
-    exportOptions.setAttribute("aria-label", label(action));
-  }
-  for (const [name, button] of Object.entries(exportTriggers)) {
-    button.setAttribute("aria-expanded", String(name === action));
-  }
+function setExportOptions(open) {
+  exportOptions.hidden = !open;
+  exportButton.setAttribute("aria-expanded", String(open));
 }
 
-function showExportOptions(action) {
-  setExportOptions(pngAction === action ? null : action);
-  if (pngAction) exportVisible.focus({ preventScroll: true });
+function toggleExportOptions() {
+  setExportOptions(exportOptions.hidden);
+  if (!exportOptions.hidden) exportButtons[0].focus({ preventScroll: true });
 }
 
-function exportImage(full) {
-  if (!pngAction) return;
+function exportImage(action, full) {
   finishTextEdit(true);
   if (full && !objects.length) return;
-  const action = pngAction;
-  setExportOptions(null);
-  exportTriggers[action].focus({ preventScroll: true });
+  setExportOptions(false);
+  exportButton.focus({ preventScroll: true });
   if (action === "copy") copyImage(full);
   else downloadImage(full);
 }
@@ -1657,15 +1893,20 @@ async function capturePng(full) {
 
 async function downloadImage(full) {
   try {
-    const url = URL.createObjectURL(await capturePng(full));
-    const link = document.createElement("a");
-    link.download = full ? "xinit-paint-full.png" : "xinit-paint-visible.png";
-    link.href = url;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const fileName = paintFileName("png");
+    downloadPaintBlob(await capturePng(full), fileName);
   } catch {
     announce("exportError");
   }
+}
+
+function downloadPaintBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.download = name;
+  link.href = url;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 canvas.addEventListener("pointerdown", startPointer);
@@ -1769,7 +2010,7 @@ function updateConstrainedGesture(event) {
 }
 
 document.addEventListener("keydown", event => {
-  if (event.defaultPrevented) return;
+  if (app.inert || clearDialog.open || shareLimitDialog.open || event.defaultPrevented || event.target === shareLink) return;
   if (openSettings && event.key === "Escape") {
     event.preventDefault();
     closeSettingsPopup(true);
@@ -1780,19 +2021,38 @@ document.addEventListener("keydown", event => {
     closePalette(true);
     return;
   }
-  if (pngAction && event.key === "Escape") {
-    const trigger = exportTriggers[pngAction];
-    setExportOptions(null);
-    trigger.focus({ preventScroll: true });
+  if (!exportOptions.hidden && event.key === "Escape") {
+    setExportOptions(false);
+    exportButton.focus({ preventScroll: true });
     return;
   }
+  const { code, target } = event;
+  if (!event.isComposing && !event.shiftKey && !event.altKey) {
+    if (primaryModifier(event) && !(appleKeyboard ? event.ctrlKey : event.metaKey)) {
+      const button = code === "KeyS" ? saveProjectButton : code === "KeyO" ? openFileButton : null;
+      if (button) {
+        event.preventDefault();
+        if (!event.repeat) button.click();
+        return;
+      }
+    } else if (!event.ctrlKey && !event.metaKey && !textEdit &&
+      (target === document.body || app.contains(target)) &&
+      !target.isContentEditable && !target.closest("input, textarea, select")) {
+      const tool = toolShortcuts.get(code);
+      if (tool) {
+        event.preventDefault();
+        if (!event.repeat) setTool(tool);
+        return;
+      }
+    }
+  }
   if (primaryModifier(event) && event.code === "KeyZ" && !event.shiftKey && !event.altKey &&
-    !textEdit && !clearDialog.open && !app.inert && app.contains(event.target)) {
+    !textEdit && app.contains(event.target)) {
     event.preventDefault();
     undoEdit();
     return;
   }
-  if (!selection.size || textEdit || crop || gesture || clearDialog.open ||
+  if (!selection.size || textEdit || crop || gesture ||
     event.code !== "KeyD" || !primaryModifier(event)) return;
   event.preventDefault();
   if (event.repeat) return;
@@ -1806,9 +2066,8 @@ document.addEventListener("pointerdown", event => {
   if (openSettings && !openSettings.popup.contains(event.target) && !openSettings.button.contains(event.target)) {
     closeSettingsPopup();
   }
-  if (pngAction && !exportOptions.contains(event.target) &&
-    !Object.values(exportTriggers).some(button => button.contains(event.target))) {
-    setExportOptions(null);
+  if (!exportOptions.hidden && !exportOptions.contains(event.target) && !exportButton.contains(event.target)) {
+    setExportOptions(false);
   }
 });
 
@@ -1827,10 +2086,22 @@ window.addEventListener("blur", releaseSpace);
 window.addEventListener("pagehide", () => {
   if (viewSaveTimer !== undefined) persistScene();
 });
+window.addEventListener("hashchange", event => {
+  const previous = new URL(event.oldURL);
+  if (!previous.hash.startsWith(paintSharePrefix) && !location.hash.startsWith(paintSharePrefix)) return;
+  if (projectDirty) {
+    if (!window.confirm(label("discardProject"))) {
+      history.replaceState(history.state, "", previous);
+      return;
+    }
+    setProjectDirty(false);
+  }
+  location.reload();
+});
 touchLayout.addEventListener("change", updateControls);
 
 document.addEventListener("copy", event => {
-  if (app.inert || clearDialog.open || textEdit || crop || gesture ||
+  if (app.inert || clearDialog.open || textEdit || crop || gesture || event.target === shareLink ||
     (event.target !== document.body && !app.contains(event.target)) ||
     !event.clipboardData || window.getSelection()?.isCollapsed === false) return;
   if (!selection.size) {
@@ -1849,7 +2120,7 @@ document.addEventListener("copy", event => {
 });
 
 document.addEventListener("paste", event => {
-  if (app.inert || clearDialog.open || textEdit || gesture) return;
+  if (app.inert || clearDialog.open || shareLimitDialog.open || textEdit || gesture || event.target === shareLink) return;
   const token = event.clipboardData?.getData(objectClipboardType);
   if (token && token === localClipboardObjects?.token) {
     event.preventDefault();
@@ -1866,9 +2137,25 @@ document.addEventListener("paste", event => {
   }
 });
 
+function isProjectFile(file) {
+  return /\.xpaint$/i.test(file.name);
+}
+
+async function openPaintFile(file, point) {
+  if (!isProjectFile(file)) {
+    await importImage(file, point);
+    return;
+  }
+  app.inert = true;
+  const opened = await openProjectCopy(unpackPaintProject(file), true);
+  app.inert = false;
+  if (opened) canvas.focus({ preventScroll: true });
+}
+
 fileInput.addEventListener("change", () => {
-  if (fileInput.files.length) importImage(fileInput.files[0]);
+  const file = fileInput.files[0];
   fileInput.value = "";
+  if (file && !app.inert) openPaintFile(file);
 });
 
 stage.addEventListener("dragover", event => {
@@ -1884,13 +2171,19 @@ stage.addEventListener("drop", event => {
   if (!event.dataTransfer.types.includes("Files")) return;
   event.preventDefault();
   stage.removeAttribute("data-drop");
-  const file = Array.from(event.dataTransfer.files).find(item => item.type.startsWith("image/"));
-  importImage(file, worldPoint(screenPoint(event)));
+  const file = Array.from(event.dataTransfer.files).find(item => isProjectFile(item) || item.type.startsWith("image/"));
+  if (app.inert) return;
+  if (file) openPaintFile(file, worldPoint(screenPoint(event)));
+  else announce("imageError");
 });
 
 initSiteLanguage(document.querySelector("#interface-language"), nextLanguage => {
   language = nextLanguage;
   localizePage(paintTranslations, language);
+  for (const button of app.querySelectorAll("[aria-keyshortcuts]")) {
+    const shortcut = button.getAttribute("aria-keyshortcuts").replace(modifierKey, modifierLabel);
+    button.title += ` (${shortcut})`;
+  }
   updateControls();
   status.textContent = statusKey ? label(statusKey) : "";
 });

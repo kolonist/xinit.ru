@@ -110,6 +110,24 @@
   pointer-events: none;
 }
 
+.paint-notice {
+  position: absolute;
+  inset: calc(100% + 0.4rem) 0 auto;
+  display: grid;
+  justify-items: center;
+  gap: 0.3rem;
+}
+
+.paint-status {
+  max-width: 100%;
+  margin: 0;
+  color: var(--signal);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  text-align: center;
+  text-shadow: 0 1px 2px #020a14, 0 0 4px #020a14;
+}
+
 .control-group {
   display: flex;
   gap: 0.2rem;
@@ -124,15 +142,51 @@
 
 .control-group[hidden], .tool-button[hidden], .canvas-hint[hidden] { display: none; }
 
-#actions, #selection-actions, .export-options {
+#actions .tool-button[aria-expanded="true"],
+#actions .tool-button[aria-disabled="true"] {
+  border-color: var(--accent);
+  background: #14466a;
+}
+
+#actions .tool-button[aria-disabled="true"] { cursor: default; }
+
+#actions, #selection-actions {
   flex-wrap: wrap;
   justify-content: center;
 }
 
+.export-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  width: min(100%, 21rem);
+}
+
 .export-options .action-button {
   min-height: 2.35rem;
+  flex-direction: column;
+  gap: 0.15rem;
   padding: 0.35rem 0.55rem;
   font-size: 0.8rem;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.export-options .action-button > span:last-child { font-weight: 400; }
+
+.export-command {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  gap: 0.12rem 0.3rem;
+}
+
+.export-command svg {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
 }
 
 .zoom-controls {
@@ -325,7 +379,7 @@
 .stroke-tools [data-line-style="dashed"] path { stroke-dasharray: 3 4.5; }
 .stroke-tools [data-line-style="dotted"] path { stroke-dasharray: 0.01 4.5; }
 
-#clear-dialog {
+.paint-dialog {
   position: fixed;
   inset: 0;
   width: min(25rem, calc(100% - 2rem));
@@ -334,10 +388,10 @@
   color: inherit;
 }
 
-#clear-dialog::before { top: 0; left: 0; }
-#clear-dialog::after { right: 0; bottom: 0; }
-#clear-dialog::backdrop { background: #020911ad; }
-#clear-title { margin-top: 0; font-size: 1.1rem; }
+.paint-dialog::before { top: 0; left: 0; }
+.paint-dialog::after { right: 0; bottom: 0; }
+.paint-dialog::backdrop { background: #020911ad; }
+.paint-dialog h2 { margin-top: 0; font-size: 1.1rem; }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; }
 
 .canvas-hint {
@@ -390,7 +444,24 @@
 }
 
 .paint-feedback p:empty { display: none; }
-.paint-feedback #status { color: var(--signal); }
+
+#share-download {
+  color: var(--accent);
+  text-decoration: underline;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+#share-link {
+  width: min(100%, 25rem);
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  background: #07182e;
+  color: inherit;
+  font: inherit;
+  font-size: 0.75rem;
+  pointer-events: auto;
+}
 
 #text-content {
   position: absolute;
