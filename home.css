@@ -26,7 +26,6 @@
 }
 
 .home-feature-description {
-  max-width: 43ch;
   margin: 0.7rem 0 1.2rem;
   color: var(--muted);
   font-size: clamp(0.85rem, 1.4vw, 0.95rem);
