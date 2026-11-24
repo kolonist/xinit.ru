@@ -3,6 +3,8 @@
 const stage = document.querySelector("#stage");
 const canvas = document.querySelector("#drawing");
 const context = canvas.getContext("2d");
+const sceneCanvas = document.querySelector("#paint-scene");
+const sceneContext = sceneCanvas.getContext("2d");
 const emptyHint = document.querySelector("#empty-hint");
 const toolHint = document.querySelector("#tool-hint");
 const mousePanHint = document.querySelector("#mouse-pan-hint");
@@ -85,6 +87,12 @@ let textEdit = null;
 let statusKey = "";
 let statusTimeout;
 let frame = 0;
+let renderedView = null;
+let sceneDirty = true;
+let markerPreview = null;
+let overlayVisible = false;
+let viewPreviewTimer;
+let viewSaveTimer;
 let localClipboardImage = null;
 let pngAction = null;
 
@@ -162,7 +170,7 @@ transparencyInput.addEventListener("input", () => {
     object.fillTransparency = fillTransparency;
   }
   updateControls();
-  requestDraw();
+  requestSceneDraw();
 });
 transparencyInput.addEventListener("change", () => commitSceneEdit());
 
@@ -195,7 +203,7 @@ for (const { kind, input } of strokeSliders) {
       }
     }
     updateControls();
-    requestDraw();
+    requestSceneDraw();
   });
   input.addEventListener("change", () => commitSceneEdit());
 }
@@ -487,9 +495,7 @@ function updateControls() {
   backButton.disabled = lowerButton.disabled = !canMoveLayers(-1);
   frontButton.disabled = raiseButton.disabled = !canMoveLayers(1);
   emptyHint.hidden = objects.length > 0 || Boolean(draft || textEdit) || laserPoints.length > 0;
-  zoomButton.textContent = `${Math.round(view.zoom * 100)}%`;
-  zoomOutButton.disabled = view.zoom <= 0.1;
-  zoomInButton.disabled = view.zoom >= 8;
+  updateZoomControls();
   const hints = {
     select: touchLayout.matches ? "marqueeHint" : "clickSelectionHint",
     text: "textHint",
@@ -503,6 +509,12 @@ function updateControls() {
   if (crop) hint = "cropHint";
   if (textEdit) hint = "textEditHint";
   toolHint.textContent = label(hint);
+}
+
+function updateZoomControls() {
+  zoomButton.textContent = `${Math.round(view.zoom * 100)}%`;
+  zoomOutButton.disabled = view.zoom <= 0.1;
+  zoomInButton.disabled = view.zoom >= 8;
 }
 
 function announce(key) {
@@ -519,6 +531,77 @@ function requestDraw() {
   if (!frame) frame = requestAnimationFrame(draw);
 }
 
+function requestSceneDraw() {
+  sceneDirty = true;
+  requestDraw();
+}
+
+function setViewTransform(target, pixelRatio, marginX = 0, marginY = 0) {
+  const scale = pixelRatio * view.zoom;
+  target.setTransform(scale, 0, 0, scale, pixelRatio * (view.x + marginX), pixelRatio * (view.y + marginY));
+}
+
+function drawScene(width, height, pixelRatio, editObject) {
+  const marginX = Math.min(96, Math.round(width / 10));
+  const marginY = Math.min(96, Math.round(height / 10));
+  const sceneWidth = width + marginX * 2;
+  const sceneHeight = height + marginY * 2;
+  const pixelWidth = Math.round(sceneWidth * pixelRatio);
+  const pixelHeight = Math.round(sceneHeight * pixelRatio);
+  if (sceneCanvas.width !== pixelWidth || sceneCanvas.height !== pixelHeight) {
+    sceneCanvas.width = pixelWidth;
+    sceneCanvas.height = pixelHeight;
+  }
+  sceneCanvas.style.width = `${sceneWidth}px`;
+  sceneCanvas.style.height = `${sceneHeight}px`;
+  sceneCanvas.style.transform = `translate(${-marginX}px, ${-marginY}px)`;
+  sceneContext.resetTransform();
+  sceneContext.clearRect(0, 0, sceneCanvas.width, sceneCanvas.height);
+  sceneContext.save();
+  setViewTransform(sceneContext, pixelRatio, marginX, marginY);
+  const viewport = {
+    left: (-view.x - marginX - 1) / view.zoom,
+    top: (-view.y - marginY - 1) / view.zoom,
+    right: (width + marginX - view.x + 1) / view.zoom,
+    bottom: (height + marginY - view.y + 1) / view.zoom,
+  };
+  for (const object of objects) {
+    if (object === editObject) continue;
+    // Text ink can extend beyond the advance widths used for selection.
+    if (object.type !== "text") {
+      const { left, top, right, bottom } = worldBounds(object);
+      if (right < viewport.left || left > viewport.right ||
+          bottom < viewport.top || top > viewport.bottom) continue;
+    }
+    drawObject(sceneContext, object);
+  }
+  sceneContext.restore();
+  renderedView = { ...view, width, height, pixelRatio, editObject, marginX, marginY };
+}
+
+function previewCachedView(width, height) {
+  if (viewPreviewTimer === undefined || draft || markerPreview) return false;
+  const { x, y, zoom, marginX, marginY } = renderedView;
+  const scale = view.zoom / zoom;
+  const left = view.x - (x + marginX) * scale;
+  const top = view.y - (y + marginY) * scale;
+  // Reuse the padded bitmap while it covers the viewport at a usable scale.
+  if (scale > 1.5 || left > 0 || top > 0 ||
+      left + (width + marginX * 2) * scale < width ||
+      top + (height + marginY * 2) * scale < height) return false;
+  sceneCanvas.style.transform = `translate(${left}px, ${top}px) scale(${scale})`;
+  return true;
+}
+
+function requestViewPreview() {
+  clearTimeout(viewPreviewTimer);
+  viewPreviewTimer = setTimeout(() => {
+    viewPreviewTimer = undefined;
+    requestDraw();
+  }, 120);
+  requestDraw();
+}
+
 function draw(now) {
   frame = 0;
   const { clientWidth: width, clientHeight: height } = canvas;
@@ -529,27 +612,52 @@ function draw(now) {
   if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
     canvas.width = pixelWidth;
     canvas.height = pixelHeight;
+    sceneDirty = true;
   }
 
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.save();
-  context.scale(pixelRatio, pixelRatio);
-  context.translate(view.x, view.y);
-  context.scale(view.zoom, view.zoom);
-  for (const object of objects) {
-    if (object !== textEdit?.object) drawObject(context, object);
+  const editObject = textEdit?.isNew ? null : textEdit?.object ?? null;
+  const needsRedraw = sceneDirty || !renderedView || renderedView.width !== width ||
+    renderedView.height !== height || renderedView.pixelRatio !== pixelRatio || renderedView.editObject !== editObject;
+  const viewChanged = renderedView &&
+    (renderedView.x !== view.x || renderedView.y !== view.y || renderedView.zoom !== view.zoom);
+  if (needsRedraw || (viewChanged && !previewCachedView(width, height))) {
+    drawScene(width, height, pixelRatio, editObject);
+    sceneDirty = false;
+    markerPreview = null;
+  } else if (!viewChanged) {
+    sceneCanvas.style.transform = `translate(${-renderedView.marginX}px, ${-renderedView.marginY}px)`;
   }
-  if (draft) drawObject(context, draft);
-  if (selection.size && !textEdit && !draft) drawSelection();
-  if (gesture?.kind === "marquee") drawMarquee(gesture.bounds);
+  if (markerPreview) {
+    sceneContext.putImageData(markerPreview.pixels, markerPreview.x, markerPreview.y);
+    markerPreview = null;
+  }
+  if (draft?.type === "marker") {
+    // The marker blends with the artwork. Keep its unmodified pixels for the next preview.
+    sceneContext.save();
+    setViewTransform(sceneContext, pixelRatio, renderedView.marginX, renderedView.marginY);
+    markerPreview = drawHighlighter(sceneContext, draft, true);
+    sceneContext.restore();
+  }
 
+  const showDraft = draft && draft.type !== "marker";
+  const showSelection = selection.size > 0 && !textEdit && !draft;
+  const showMarquee = gesture?.kind === "marquee";
   if (laserPoints.length) {
     laserPoints = laserPoints.filter(point => now - point.time < laserDuration);
-    drawLaser(now);
     if (laserPoints.length) requestDraw();
     else updateControls();
   }
-  context.restore();
+  if (overlayVisible) context.clearRect(0, 0, canvas.width, canvas.height);
+  overlayVisible = Boolean(showDraft || showSelection || showMarquee || laserPoints.length);
+  if (overlayVisible) {
+    context.save();
+    setViewTransform(context, pixelRatio);
+    if (showDraft) drawObject(context, draft);
+    if (showSelection) drawSelection();
+    if (showMarquee) drawMarquee(gesture.bounds);
+    if (laserPoints.length) drawLaser(now);
+    context.restore();
+  }
   if (textEdit) positionTextEditor();
 }
 
@@ -684,9 +792,12 @@ function zoomAt(anchor, nextZoom, point = worldPoint(anchor)) {
   view.zoom = Math.max(0.1, Math.min(8, nextZoom));
   view.x = anchor.x - point.x * view.zoom;
   view.y = anchor.y - point.y * view.zoom;
-  updateControls();
-  requestDraw();
-  if (!gesture) persistScene();
+  updateZoomControls();
+  requestViewPreview();
+  if (!gesture) {
+    clearTimeout(viewSaveTimer);
+    viewSaveTimer = setTimeout(persistScene, 180);
+  }
 }
 
 function objectAt(point) {
@@ -1058,21 +1169,26 @@ function movePointer(event) {
     case "pan":
       view.x = gesture.x + screen.x - gesture.start.x;
       view.y = gesture.y + screen.y - gesture.start.y;
-      break;
+      requestViewPreview();
+      return;
     case "move":
       for (const { object, x, y } of gesture.transforms) {
         object.x = x + point.x - gesture.start.x;
         object.y = y + point.y - gesture.start.y;
       }
+      sceneDirty = true;
       break;
     case "resize":
       resizeSelection(point, primaryModifier(event));
+      sceneDirty = true;
       break;
     case "endpoint":
       moveEndpoint(point);
+      sceneDirty = true;
       break;
     case "rotate":
       updateRotation(point, primaryModifier(event));
+      sceneDirty = true;
       break;
     case "crop":
       resizeCrop(point);
@@ -1099,6 +1215,7 @@ function cancelGesture() {
   }
   if (gesture?.kind === "crop") crop = gesture.original;
   if (gesture?.kind === "endpoint") restoreEndpoint(gesture);
+  if (gesture?.transforms || gesture?.kind === "endpoint") sceneDirty = true;
   gesture = null;
   draft = null;
 }
@@ -1329,6 +1446,7 @@ function commitSceneEdit(beforeClear = null) {
     if (undoHistory.length > undoLimit) undoHistory.shift();
     committedObjects = edited;
     undoButton.disabled = false;
+    requestSceneDraw();
   }
   persistScene();
 }
@@ -1359,12 +1477,15 @@ function undoEdit() {
   }
   if (!objects.length) activeTool = "brush";
   setSelection(objects.filter(object => previousSelection.has(object)));
+  requestSceneDraw();
   persistScene();
   canvas.focus({ preventScroll: true });
   announce("undone");
 }
 
 function persistScene() {
+  clearTimeout(viewSaveTimer);
+  viewSaveTimer = undefined;
   if (!database) return;
   const savedObjects = objects.map(savePaintObject);
   if (textEdit && textContent.value.trim()) {
@@ -1407,7 +1528,7 @@ async function restoreScene() {
     activeTool = objects.length ? "select" : "brush";
     app.inert = false;
     updateControls();
-    requestDraw();
+    requestSceneDraw();
   }
 }
 
@@ -1578,7 +1699,8 @@ function updateConstrainedGesture(event) {
   if (gesture.kind === "resize") resizeSelection(point, constrained);
   else if (gesture.kind === "rotate") updateRotation(point, constrained);
   else updateShape(draft, point, constrained);
-  requestDraw();
+  if (gesture.kind === "shape") requestDraw();
+  else requestSceneDraw();
 }
 
 document.addEventListener("keydown", event => {
@@ -1645,6 +1767,9 @@ window.addEventListener("keyup", event => {
 window.addEventListener("keydown", updateConstrainedGesture);
 window.addEventListener("keyup", updateConstrainedGesture);
 window.addEventListener("blur", releaseSpace);
+window.addEventListener("pagehide", () => {
+  if (viewSaveTimer !== undefined) persistScene();
+});
 touchLayout.addEventListener("change", updateControls);
 
 document.addEventListener("paste", event => {
@@ -1699,6 +1824,6 @@ window.addEventListener("resize", positionPopups);
 document.querySelector(".paint-sidebar").addEventListener("scroll", positionPopups);
 document.fonts.addEventListener("loadingdone", () => {
   objects.filter(object => object.type === "text").forEach(object => measureTextObject(context, object));
-  requestDraw();
+  requestSceneDraw();
 });
 restoreScene();

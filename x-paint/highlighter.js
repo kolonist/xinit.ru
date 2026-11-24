@@ -42,7 +42,7 @@ function blendHighlight(target, mask, color) {
   }
 }
 
-function drawHighlighter(context, object) {
+function drawHighlighter(context, object, preserveBackdrop = false) {
   const { a, b, c, d } = objectMatrix(object);
   const transform = context.getTransform().multiply(new DOMMatrix([a, b, c, d, object.x, object.y]));
   const { x, y, width, height } = highlighterArea(context, object, transform);
@@ -61,6 +61,7 @@ function drawHighlighter(context, object) {
   drawStrokePath(highlightContext, object);
   const mask = highlightContext.getImageData(0, 0, width, height);
   const backdrop = context.getImageData(x, y, width, height);
+  const original = preserveBackdrop ? new ImageData(backdrop.data.slice(), width, height) : null;
   blendHighlight(backdrop.data, mask.data, object.color || "#ffffff");
   highlightContext.putImageData(backdrop, 0, 0);
 
@@ -72,4 +73,5 @@ function drawHighlighter(context, object) {
   context.globalCompositeOperation = "copy";
   context.drawImage(highlightMask, x, y);
   context.restore();
+  if (original) return { x, y, pixels: original };
 }
