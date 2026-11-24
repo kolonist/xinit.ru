@@ -11,6 +11,7 @@
   --accent: #9ceaff;
   --electric: #26b9ff;
   --signal: #ffbe79;
+  --tool-button-size: 2.35rem;
 }
 
 * { box-sizing: border-box; }
@@ -367,8 +368,8 @@ body {
   display: grid;
   place-items: center;
   min-width: 0;
-  min-height: 2.35rem;
-  width: 2.35rem;
+  min-height: var(--tool-button-size);
+  width: var(--tool-button-size);
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 0;

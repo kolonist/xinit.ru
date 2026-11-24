@@ -561,7 +561,25 @@
   .color-pair .swap-colors svg { width: 0.8rem; height: 0.8rem; }
   .stroke-tools .tool-button span { display: none; }
   .paint-controls { inset: 0.4rem 0.15rem auto; }
-  .control-group { gap: 0.1rem; padding: 0.15rem; }
+  .control-group {
+    --control-gap: 0.1rem;
+    --control-padding: 0.15rem;
+    gap: var(--control-gap);
+    padding: var(--control-padding);
+  }
+
+  #actions {
+    --corner-clearance: calc(var(--preview-corner-inset) + var(--preview-corner-size) + 0.1rem);
+    --available-width: calc(100% - 2 * (var(--corner-clearance) - 0.15rem));
+    --panel-edges: calc(2 * var(--control-padding) + 2px);
+    --button-step: calc(var(--tool-button-size) + var(--control-gap));
+    max-width: var(--available-width);
+    /* Fit whole buttons in the first row without leaving empty space at the sides. */
+    max-width: calc(
+      round(down, var(--available-width) - var(--panel-edges) + var(--control-gap), var(--button-step))
+      + var(--panel-edges) - var(--control-gap) + 0.1px
+    );
+  }
   .zoom-controls { right: 0.4rem; bottom: 0.4rem; }
   .paint-feedback { inset: auto 0.4rem 3.2rem; }
   .paint-hints { display: none; }
