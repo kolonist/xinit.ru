@@ -602,6 +602,46 @@ function measureTextObject(context, object) {
   };
 }
 
+function layoutShapeLabel(context, object, shape) {
+  const { x, y } = shape.end;
+  const center = { x: x / 2, y: y / 2 };
+  const { a, b, c, d } = objectMatrix(shape);
+  const horizontalScale = Math.hypot(a, b);
+  const verticalScale = Math.hypot(c, d);
+  const width = Math.max(object.bounds.right, textWidth(context, ["WWWWWWWWW"]));
+  const halfWidth = (width / 2 + 3) / horizontalScale;
+  const halfHeight = (object.bounds.bottom / 2 + 3) / verticalScale;
+  let scale = Math.min(1, Math.abs(x) / (2 * halfWidth), Math.abs(y) / (2 * halfHeight));
+  const inset = 0.9;
+  context.save();
+  context.resetTransform();
+  const fits = size => [-1, 0, 1].every(vertical => [-1, 1].every(horizontal =>
+    context.isPointInPath(shape.path, center.x + horizontal * halfWidth * size, center.y + vertical * halfHeight * size)));
+  if (!fits(scale / inset)) {
+    let low = 0;
+    let high = scale;
+    for (let index = 0; index < 20; index++) {
+      const middle = (low + high) / 2;
+      if (fits(middle / inset)) low = middle;
+      else high = middle;
+    }
+    scale = low;
+  }
+  context.restore();
+  const scaleX = Math.max(scale, Number.EPSILON) / horizontalScale;
+  const scaleY = Math.max(scale, Number.EPSILON) / verticalScale;
+  const origin = objectToWorld(shape, {
+    x: center.x - object.bounds.right * scaleX / 2,
+    y: center.y - object.bounds.bottom * scaleY / 2,
+  });
+  Object.assign(object, origin, {
+    scaleX: shape.scaleX * scaleX,
+    scaleY: shape.scaleY * scaleY,
+    angle: shape.angle,
+    shear: (shape.shear ?? 0) * scaleY,
+  });
+}
+
 function createImageObject(image, blob, center) {
   const width = image.naturalWidth;
   const height = image.naturalHeight;
@@ -645,7 +685,10 @@ function drawObject(context, object) {
   } else if (object.type === "text") {
     context.font = paintFont;
     context.textBaseline = "alphabetic";
-    object.lines.forEach((line, index) => context.fillText(line, 0, 25 + index * paintLineHeight));
+    const centered = object.labelShapeId !== undefined;
+    context.textAlign = centered ? "center" : "left";
+    const x = centered ? object.bounds.right / 2 : 0;
+    object.lines.forEach((line, index) => context.fillText(line, x, 25 + index * paintLineHeight));
   } else {
     if (object.fill) {
       context.save();
@@ -680,7 +723,7 @@ function drawStrokePath(context, object) {
   }
 }
 
-function objectContainsPoint(context, object, point, tolerance) {
+function objectContainsPoint(context, object, point, tolerance, includeShapeInterior = false) {
   if (!containsPoint(padBounds(worldBounds(object), tolerance), point)) return false;
   const local = worldToObject(object, point);
   const localTolerance = tolerance / Math.min(object.scaleX, object.scaleY);
@@ -690,7 +733,8 @@ function objectContainsPoint(context, object, point, tolerance) {
   context.lineWidth = object.weight + localTolerance * 2;
   context.lineCap = context.lineJoin = "round";
   const { x, y } = local;
-  const hit = (object.fill && object.fillTransparency !== 100 && context.isPointInPath(object.path, x, y)) ||
+  const hit = (((object.fill && object.fillTransparency !== 100) || (includeShapeInterior && object.shapeId)) &&
+    context.isPointInPath(object.path, x, y)) ||
     context.isPointInStroke(object.path, x, y) ||
     (object.detailPath && context.isPointInStroke(object.detailPath, x, y)) ||
     (object.arrowhead && context.isPointInStroke(object.arrowhead, x, y));

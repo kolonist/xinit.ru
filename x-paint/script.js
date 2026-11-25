@@ -75,7 +75,7 @@ const undoHistory = [];
 const undoLimit = 42;
 const editableProperties = ["x", "y", "scaleX", "scaleY", "angle", "shear", "color", "fill",
   "fillTransparency", "groupId", "text", "source", "weight", "end", "lineStyle", "shapeAdjustments", "lineEnds", "points",
-  "startShapeId", "endShapeId", "startConnectionDirection", "endConnectionDirection", "connectionOffset"];
+  "startShapeId", "endShapeId", "startConnectionDirection", "endConnectionDirection", "connectionOffset", "labelShapeId"];
 const propertyDefaults = { angle: 0, shear: 0, fill: null, fillTransparency: 0, lineEnds: 0 };
 let committedObjects = [];
 const view = { x: 0, y: 0, zoom: 1 };
@@ -313,7 +313,7 @@ for (const button of exportButtons) {
   button.addEventListener("click", () => exportImage(button.dataset.export, button.hasAttribute("data-full")));
 }
 
-const editButton = addButton(selectionActions, "edit", () => openTextEditor(singleSelection()));
+const editButton = addButton(selectionActions, "edit", () => editCanvasText(selectedTextTarget()));
 const cropButton = addButton(selectionActions, "crop", () => {
   crop = { ...singleSelection().bounds };
   updateControls();
@@ -416,7 +416,10 @@ function groupSelection() {
 function ungroupSelection() {
   if (ungroupButton.hidden) return;
   cancelGesture();
-  for (const object of selection) delete object.groupId;
+  for (const object of selection) {
+    delete object.groupId;
+    if (object.labelShapeId) object.labelShapeId = null;
+  }
   finishGrouping("ungrouped");
 }
 
@@ -645,7 +648,7 @@ function updateControls() {
   }
   cropActions.hidden = !crop;
   textActions.hidden = !textEdit;
-  editButton.hidden = object?.type !== "text";
+  editButton.hidden = !selectedTextTarget();
   cropButton.hidden = object?.type !== "image";
   rotateButton.hidden = Boolean(selectedSegment());
   const groupId = selection.values().next().value?.groupId;
@@ -1125,8 +1128,8 @@ function zoomAt(anchor, nextZoom, point = worldPoint(anchor)) {
   }
 }
 
-function objectAt(point) {
-  return objects.findLast(object => objectContainsPoint(context, object, point, 6 / view.zoom));
+function objectAt(point, includeShapeInterior = false) {
+  return objects.findLast(object => objectContainsPoint(context, object, point, 6 / view.zoom, includeShapeInterior));
 }
 
 function worldShapePath(shape) {
@@ -1708,14 +1711,17 @@ function movePointer(event) {
       view.y = gesture.y + screen.y - gesture.start.y;
       requestViewPreview();
       return;
-    case "move":
+    case "move": {
+      const dx = point.x - gesture.start.x;
+      const dy = point.y - gesture.start.y;
       for (const { object, x, y, geometry } of gesture.transforms) {
         Object.assign(object, geometry);
-        object.x = x + point.x - gesture.start.x;
-        object.y = y + point.y - gesture.start.y;
+        object.x = x + dx;
+        object.y = y + dy;
       }
       sceneDirty = true;
       break;
+    }
     case "resize":
       resizeSelection(point, primaryModifier(event));
       sceneDirty = true;
@@ -1820,7 +1826,8 @@ function finishPointer(event, cancelled) {
       draft = null;
       if (kind === "text" && !clickedObject && !dragged(6)) {
         const object = objectAt(start);
-        openTextEditor(object?.type === "text" ? object : null, start);
+        if (object?.type === "text") editCanvasText(object);
+        else openTextEditor(null, start);
       }
       if (kind === "marquee" && dragged(3)) {
         setSelection(objects.filter(object => {
@@ -1837,12 +1844,45 @@ function finishPointer(event, cancelled) {
   requestDraw();
 }
 
-function openTextEditor(object, point) {
+function canLabelShape(object) {
+  return Boolean(object?.shapeId && object.end.x && object.end.y);
+}
+
+function selectedTextTarget() {
+  const object = singleSelection();
+  if (object?.type === "text" || canLabelShape(object)) return object;
+  const items = [...selection];
+  const shapes = items.filter(canLabelShape);
+  if (shapes.length === 1 && items.every(item => item === shapes[0] || item.labelShapeId === shapes[0].shapeId)) {
+    return shapes[0];
+  }
+  return null;
+}
+
+function editCanvasText(target) {
+  if (target?.type === "text") {
+    const shape = target.labelShapeId && objects.find(object => object.shapeId === target.labelShapeId);
+    openTextEditor(target, undefined, shape);
+  } else if (canLabelShape(target)) {
+    const existing = target.groupId && objects.find(object =>
+      object.groupId === target.groupId && object.labelShapeId === target.shapeId);
+    if (!selection.has(target)) setSelection([target]);
+    openTextEditor(existing || null, shapeCenter(target), target);
+  }
+}
+
+function openTextEditor(object, point, shape = null) {
   if (textEdit) return;
-  textEdit = { object: object || createObject("text", point, color), isNew: !object };
+  const edited = object || createObject("text", point, shape?.color ?? color);
+  if (shape && !object) {
+    edited.labelShapeId = shape.shapeId;
+    edited.groupId = shape.groupId || newGroupId();
+  }
+  textEdit = { object: edited, isNew: !object, shape };
   textContent.value = object?.text || "";
-  textContent.style.color = textEdit.object.color;
-  const ink = textEdit.object.color;
+  textContent.style.textAlign = edited.labelShapeId !== undefined ? "center" : "left";
+  textContent.style.color = edited.color;
+  const ink = edited.color;
   const channels = [1, 3, 5].map(offset => parseInt(ink.slice(offset, offset + 2), 16));
   const brightness = channels[0] * 0.213 + channels[1] * 0.715 + channels[2] * 0.072;
   textContent.toggleAttribute("data-dark-ink", brightness < 120);
@@ -1854,21 +1894,36 @@ function openTextEditor(object, point) {
   requestDraw();
 }
 
+function shapeLabelDraft() {
+  const source = textEdit.object;
+  if (source.text === textContent.value) return source;
+  const object = { ...source, text: textContent.value };
+  measureTextObject(context, object);
+  layoutShapeLabel(context, object, textEdit.shape);
+  return object;
+}
+
 function positionTextEditor() {
-  const { object } = textEdit;
+  const { shape } = textEdit;
+  const object = shape ? shapeLabelDraft() : textEdit.object;
   const { clientWidth: width, clientHeight: height } = canvas;
+  if (!width || !height) return;
   const scaleX = Math.max(0.5, object.scaleX * view.zoom);
   const scaleY = Math.min(height / paintLineHeight, Math.max(0.5, object.scaleY * view.zoom));
-  if (!width || !height) return;
-  const x = Math.max(0, Math.min(width - 44, view.x + object.x * view.zoom));
-  const y = Math.max(0, Math.min(height - paintLineHeight * scaleY, view.y + object.y * view.zoom));
   const lines = textContent.value.split("\n");
   const contentWidth = Math.max(80, Math.ceil(textWidth(context, lines)) + 24);
+  const { a, b, c, d } = objectMatrix({ ...object, scaleX, scaleY, shear: (object.shear ?? 0) * view.zoom });
+  const center = shape && shapeCenter(shape);
+  const editorWidth = center ? Math.max(contentWidth, Math.ceil(textWidth(context, ["WWWWWWWWW"])) + 24) : contentWidth;
+  const editorHeight = lines.length * paintLineHeight;
+  const originX = center ? center.x * view.zoom - (a * editorWidth + c * editorHeight) / 2 : object.x * view.zoom;
+  const originY = center ? center.y * view.zoom - (b * editorWidth + d * editorHeight) / 2 : object.y * view.zoom;
+  const x = Math.max(0, Math.min(width - 44, view.x + originX));
+  const y = Math.max(0, Math.min(height - paintLineHeight * scaleY, view.y + originY));
   textContent.style.left = `${x}px`;
   textContent.style.top = `${y}px`;
-  textContent.style.width = `${Math.min(contentWidth, (width - x) / scaleX)}px`;
-  textContent.style.height = `${Math.min(lines.length * paintLineHeight, (height - y) / scaleY)}px`;
-  const { a, b, c, d } = objectMatrix({ ...object, scaleX, scaleY, shear: (object.shear ?? 0) * view.zoom });
+  textContent.style.width = `${Math.min(editorWidth, (width - x) / scaleX)}px`;
+  textContent.style.height = `${Math.min(editorHeight, (height - y) / scaleY)}px`;
   textContent.style.transform = `matrix(${a}, ${b}, ${c}, ${d}, 0, 0)`;
 }
 
@@ -1879,13 +1934,20 @@ function closeTextEditor() {
 
 function finishTextEdit(apply, focusCanvas = false) {
   if (!textEdit) return;
-  const { object, isNew } = textEdit;
-  closeTextEditor();
+  const { object, isNew, shape } = textEdit;
   const text = textContent.value;
+  const fitted = shape && apply && text.trim() ? shapeLabelDraft() : null;
+  closeTextEditor();
   if (apply && text.trim()) {
-    object.text = text;
-    measureTextObject(context, object);
-    if (isNew) objects.push(object);
+    if (fitted) Object.assign(object, fitted);
+    else {
+      object.text = text;
+      measureTextObject(context, object);
+    }
+    if (isNew && shape) {
+      shape.groupId = object.groupId;
+      objects.splice(objects.indexOf(shape) + 1, 0, object);
+    } else if (isNew) objects.push(object);
     activeTool = "select";
     setSelection([object], { fromDrawing: isNew });
     commitSceneEdit();
@@ -1943,6 +2005,7 @@ function cloneObjects(items, offset) {
   return items.map(object => {
     const copy = { ...object, x: object.x + offset.x, y: object.y + offset.y };
     if (object.shapeId) copy.shapeId = shapeCopies.get(object.shapeId);
+    if (object.labelShapeId) copy.labelShapeId = shapeCopies.get(object.labelShapeId) ?? null;
     if (hasLineConnections(object)) {
       copy.startShapeId = shapeCopies.get(object.startShapeId);
       copy.endShapeId = shapeCopies.get(object.endShapeId);
@@ -2098,8 +2161,13 @@ function currentPaintScene(includePolyline = false) {
   const line = includePolyline ? polylineDraftSnapshot() : null;
   if (line) savedObjects.push(savePaintObject(line));
   if (textEdit && textContent.value.trim()) {
-    const savedText = savePaintObject({ ...textEdit.object, text: textContent.value });
-    if (textEdit.isNew) savedObjects.push(savedText);
+    const { shape, isNew } = textEdit;
+    const savedText = savePaintObject(shape ? shapeLabelDraft() : { ...textEdit.object, text: textContent.value });
+    if (isNew && shape) {
+      const index = objects.indexOf(shape);
+      savedObjects[index].groupId = savedText.groupId;
+      savedObjects.splice(index + 1, 0, savedText);
+    } else if (isNew) savedObjects.push(savedText);
     else savedObjects[objects.indexOf(textEdit.object)] = savedText;
   }
   return {
@@ -2640,9 +2708,8 @@ canvas.addEventListener("wheel", event => {
 }, { passive: false });
 
 canvas.addEventListener("dblclick", event => {
-  if (activeTool !== "select" || crop || primaryModifier(event)) return;
-  const object = objectAt(worldPoint(screenPoint(event)));
-  if (object?.type === "text") openTextEditor(object);
+  if ((activeTool !== "select" && !isFillableShape(activeTool)) || crop || spaceHeld || primaryModifier(event)) return;
+  editCanvasText(objectAt(worldPoint(screenPoint(event)), true));
 });
 
 canvas.addEventListener("keydown", event => {
@@ -2658,8 +2725,10 @@ canvas.addEventListener("keydown", event => {
     updateControls();
   } else if (key === "Enter" && crop) {
     finishCrop(true);
-  } else if (key === "Enter" && singleSelection()?.type === "text") {
-    openTextEditor(singleSelection());
+  } else if (key === "Enter" && !polylineDraft && !gesture) {
+    const target = selectedTextTarget();
+    if (!target || event.repeat) return;
+    editCanvasText(target);
   } else if (key === "Delete" || key === "Backspace") {
     deleteSelection();
   } else if (key === "[" || key === "]") {

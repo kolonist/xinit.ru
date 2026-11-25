@@ -66,6 +66,7 @@ function packPaintProject(scene, forLink = false) {
         options.push([startDirection, endDirection, startIndex != null && endIndex != null ? object.connectionOffset : null]);
       }
     }
+    if (object.labelShapeId !== undefined) options[13] = shapeIndexes.get(object.labelShapeId) ?? -1;
     while (options.length && options.at(-1) == null) options.pop();
     const record = [paintProjectTypes.indexOf(type), x, y, color, data];
     if (options.length) record.push(options);
@@ -255,6 +256,15 @@ async function unpackPaintProject(project) {
     return object;
   }));
   records.forEach((record, index) => {
+    const labelTarget = record[5]?.[13];
+    if (labelTarget != null) {
+      const label = objects[index];
+      const shape = objects[labelTarget];
+      checkPaintProject(label.type === "text" && Number.isInteger(labelTarget) &&
+        (labelTarget === -1 || (shape && isFillableShape(shape.type) && label.groupId && label.groupId === shape.groupId)));
+      if (shape) shape.shapeId ??= crypto.randomUUID();
+      label.labelShapeId = shape?.shapeId ?? null;
+    }
     const connections = record[5]?.[11];
     if (!connections) return;
     for (const [end, targetIndex] of connections.entries()) {
