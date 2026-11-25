@@ -148,13 +148,17 @@ function addButton(group, key, onClick, icon = key) {
 }
 
 const drawingTools = document.querySelector("#drawing-tools");
-const toolShortcuts = new Map([
-  ["KeyM", "select"], ["KeyH", "pan"], ["KeyB", "brush"], ["KeyS", "marker"],
-  ["KeyL", "line"], ["KeyA", "polyline"], ["KeyR", "rect"], ["KeyC", "circle"], ["KeyT", "text"],
-]);
-for (const [code, tool] of toolShortcuts) {
+const toolShortcuts = new Map();
+const drawingToolDefinitions = [
+  ["select", "M"], ["pan", "H"], ["brush", "B"], ["marker", "S"],
+  ["line", "L"], ["polyline"], ["rect", "R"], ["circle", "C"], ["text", "T"],
+];
+for (const [tool, shortcut] of drawingToolDefinitions) {
   const button = addButton(drawingTools, tool, () => setTool(tool));
-  button.setAttribute("aria-keyshortcuts", code.slice(3));
+  if (shortcut) {
+    toolShortcuts.set(`Key${shortcut}`, tool);
+    button.setAttribute("aria-keyshortcuts", shortcut);
+  }
   toolButtons.set(tool, button);
 }
 const shapeLibraryButton = addButton(drawingTools, "shapeLibrary", () => toggleSettingsPopup({
