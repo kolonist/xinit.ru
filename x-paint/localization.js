@@ -52,6 +52,14 @@ const paintTranslations = {
   cylinder: ["Цилиндр", "Cylinder"],
   roundedRect: ["Скруглённый прямоугольник", "Rounded rectangle"],
   cloud: ["Облако", "Cloud"],
+  person: ["Человек", "Person"],
+  serverRack: ["Серверная стойка", "Server rack"],
+  laptop: ["Ноутбук", "Laptop"],
+  router: ["Маршрутизатор", "Router"],
+  textFile: ["Файл со строками", "Text file"],
+  tensor: ["Тензор", "Tensor"],
+  queue: ["Очередь", "Queue"],
+  chip: ["Чип", "Chip"],
   text: ["Текст", "Text"],
   laser: ["Лазерная указка", "Laser pointer"],
   exportPng: ["Копировать или скачать PNG", "Copy or download PNG"],
@@ -191,6 +199,12 @@ const paintTranslations = {
   restoreError: ["Локальная копия недоступна", "The local copy is unavailable"],
 };
 
+function architectureShapeIcon(type) {
+  const { outlines, detail } = curvedShapes.get(type);
+  return `<path d="${outlines.join(" ")}" fill="currentColor" fill-opacity=".25" stroke-width="1.15"/>` +
+    `<path d="${detail}" stroke-width=".95"/>`;
+}
+
 const paintIcons = {
   select: '<path d="m4 3 14 9-7 1-3 7z"/>',
   strokeWidth: '<path d="M4 6h16"/><path d="M4 12h16" stroke-width="2.4"/><path d="M4 18h16" stroke-width="3.4"/>',
@@ -214,6 +228,14 @@ const paintIcons = {
   cylinder: '<path d="M4 6c0-5 16-5 16 0v12c0 5-16 5-16 0z" fill="currentColor" fill-opacity=".25"/><path d="M4 6c0 5 16 5 16 0"/>',
   roundedRect: '<rect x="3" y="5" width="18" height="14" rx="3" fill="currentColor" fill-opacity=".25"/>',
   cloud: '<path d="M7 19a4.5 4.5 0 0 1-1-8.9A5 5 0 0 1 15.3 8a3.3 3.3 0 0 1 4.3 3.9A3.8 3.8 0 0 1 18 19z" fill="currentColor" fill-opacity=".25"/>',
+  person: `<path d="${personOutlines.join(" ")}" stroke-width="1.1" fill="currentColor" fill-opacity=".25"/>`,
+  serverRack: `<path d="${serverRackOutline}" fill="currentColor" fill-opacity=".25"/><path d="${serverRackDetail}" stroke-width="1.2"/>`,
+  laptop: `<path d="${laptopOutline}" stroke-width="1.15" fill="currentColor" fill-opacity=".25"/><path d="${laptopHinge}" stroke-width="1.15"/><path d="${laptopKeyboard}" stroke-width=".75"/>`,
+  router: architectureShapeIcon("router"),
+  textFile: architectureShapeIcon("textFile"),
+  tensor: architectureShapeIcon("tensor"),
+  queue: architectureShapeIcon("queue"),
+  chip: architectureShapeIcon("chip"),
   text: '<path d="M5 7V4h14v3m-7-3v16m-4 0h8"/>',
   laser: '<path d="m3 21 8-8"/><path d="M13 3v3m5 0 2-2m-2 7h3m-4 4 3 3m-7-2v3m-8-8h3M6 4l3 3"/><circle cx="13" cy="11" r="1.3" fill="currentColor" stroke="none"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="1"/><path d="M16 5V4H4v12h1"/>',

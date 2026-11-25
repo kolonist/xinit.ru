@@ -7,7 +7,7 @@ const paintShareBytes = 8 * 1024 * 1024;
 // Type indexes are saved in .xpaint files and share links.
 const paintProjectTypes = ["brush", "marker", "rect", "circle", "line", "arrow", "text", "image",
   "blockArrow", "triangle", "trapezoid", "hexagon", "diamond", "parallelogram", "callout", "cylinder", "roundedRect", "cloud",
-  "polyline"];
+  "polyline", "person", "serverRack", "laptop", "router", "textFile", "tensor", "queue", "chip"];
 const paintProjectLineStyles = ["solid", "dashed", "dotted"];
 const paintPointPrecision = 8;
 

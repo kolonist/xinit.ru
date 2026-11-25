@@ -37,23 +37,94 @@ const polygonShapes = new Map([
   ["callout", calloutOutline],
 ]);
 
-// Curves use a 100 × 100 view box so resizing scales the outline and its details together.
+const personOutlines = [
+  "M12 2.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5Z",
+  "M9.5 9.1h5c1.1 0 1.7.6 2.2 1.7l2 3.8c.5 1.1-.7 1.8-1.4.9l-2.4-3.1-.5 3.2 1.1 5.2" +
+    "c.3 1.3-1.4 1.8-1.9.6L12 17l-1.6 4.4c-.5 1.2-2.2.7-1.9-.6l1.1-5.2-.5-3.2-2.4 3.1" +
+    "c-.7.9-1.9.2-1.4-.9l2-3.8c.5-1.1 1.1-1.7 2.2-1.7Z",
+];
+const serverRackOutline = "M4 3h16q1 0 1 1v16q0 1-1 1H4q-1 0-1-1V4q0-1 1-1Z";
+const serverRackDetail = "M3 9h18M3 15h18M6 6h3m-3 6h3m-3 6h3M17 6h.5m-.5 6h.5m-.5 6h.5";
+const laptopOutline = "M5 4h14q1 0 1 1v10l2.5 4q0 1-1 1h-19q-1 0-1-1L4 15V5q0-1 1-1Z";
+const laptopHinge = "M4 15h16";
+const laptopKeyboard = "M6 16.65h12M5 18.3h14";
+const defaultCurvedViewBox = { x: 0, y: 0, width: 100, height: 100 };
+const tensorCorners = [
+  [2.5, 6.5], [4.75, 6.5], [4.75, 4.25], [7, 4.25], [7, 2], [21.5, 2],
+  [21.5, 16.5], [19.25, 16.5], [19.25, 18.75], [17, 18.75], [17, 21], [2.5, 21],
+];
+
 const curvedShapes = new Map([
-  ["cylinder", [
-    "M0 15C0 6.72 22.39 0 50 0S100 6.72 100 15V85C100 93.28 77.61 100 50 100S0 93.28 0 85Z",
-    "M0 15C0 23.28 22.39 30 50 30S100 23.28 100 15",
-  ]],
-  ["roundedRect", ["M15 0H85Q100 0 100 15V85Q100 100 85 100H15Q0 100 0 85V15Q0 0 15 0Z"]],
-  ["cloud", [
-    "M22 100C9 100 0 87 0 71C0 56 7 43 18 38C18 16 28 0 42 0C51 0 57 6 61 15" +
-    "C66 8 73 6 80 12C89 18 93 31 92 45C97 50 100 59 100 70C100 87 91 100 78 100Z",
-  ]],
+  ["cylinder", {
+    outlines: ["M0 15C0 6.72 22.39 0 50 0S100 6.72 100 15V85C100 93.28 77.61 100 50 100S0 93.28 0 85Z"],
+    detail: "M0 15C0 23.28 22.39 30 50 30S100 23.28 100 15",
+  }],
+  ["roundedRect", { outlines: ["M15 0H85Q100 0 100 15V85Q100 100 85 100H15Q0 100 0 85V15Q0 0 15 0Z"] }],
+  ["cloud", {
+    outlines: ["M22 100C9 100 0 87 0 71C0 56 7 43 18 38C18 16 28 0 42 0C51 0 57 6 61 15" +
+      "C66 8 73 6 80 12C89 18 93 31 92 45C97 50 100 59 100 70C100 87 91 100 78 100Z"],
+  }],
+  ["person", {
+    outlines: personOutlines,
+    viewBox: { x: 5, y: 2.5, width: 14, height: 20 },
+    markers: [[12, 2.5], [18.7, 14.6], [15.5, 20.8], [8.5, 20.8], [5.3, 14.6]],
+  }],
+  ["serverRack", {
+    outlines: [serverRackOutline],
+    detail: serverRackDetail,
+    viewBox: { x: 3, y: 3, width: 18, height: 18 },
+  }],
+  ["laptop", {
+    outlines: [laptopOutline],
+    detail: `${laptopHinge} ${laptopKeyboard}`,
+    viewBox: { x: 1.5, y: 4, width: 21, height: 16 },
+  }],
+  ["router", {
+    outlines: ["M12 2.5a9.5 9.5 0 1 0 0 19a9.5 9.5 0 1 0 0-19Z"],
+    detail: "M12 9V5.7M10.4 7.3 12 5.7l1.6 1.6M12 15v3.3M10.4 16.7 12 18.3l1.6-1.6" +
+      "M5.7 12H9M7.4 10.4 9 12l-1.6 1.6M18.3 12H15M16.6 10.4 15 12l1.6 1.6",
+    viewBox: { x: 2.5, y: 2.5, width: 19, height: 19 },
+  }],
+  ["textFile", {
+    outlines: ["M5 2.5h9l5 5V21q0 1-1 1H6q-1 0-1-1Z"],
+    detail: "M14 2.5v5h5M8 11h8m-8 3h8m-8 3h5",
+    viewBox: { x: 5, y: 2.5, width: 14, height: 19.5 },
+    corners: [[5, 2.5], [14, 2.5], [19, 7.5]],
+  }],
+  ["tensor", {
+    outlines: [`M${tensorCorners.map(corner => corner.join(" ")).join("L")}Z`],
+    detail: "M4.75 6.5H17V18.75M7 4.25H19.25V16.5" +
+      "M2.5 11.33H17M2.5 16.17H17M7.33 6.5V21M12.17 6.5V21",
+    viewBox: { x: 2.5, y: 2, width: 19, height: 19 },
+    vertices: tensorCorners,
+  }],
+  ["queue", {
+    outlines: ["M3 8h18q1 0 1 1v6q0 1-1 1H3q-1 0-1-1V9q0-1 1-1Z"],
+    detail: "M7 8v8m5-8v8m5-8v8",
+    viewBox: { x: 2, y: 8, width: 20, height: 8 },
+  }],
+  ["chip", {
+    outlines: ["M7 5.5h10q1.5 0 1.5 1.5v10q0 1.5-1.5 1.5H7q-1.5 0-1.5-1.5V7Q5.5 5.5 7 5.5Z"],
+    detail: "M9 2.5v3m3-3v3m3-3v3M9 18.5v3m3-3v3m3-3v3M2.5 9h3m-3 3h3m-3 3h3" +
+      "M18.5 9h3m-3 3h3m-3 3h3M9 9h6v6H9Z",
+    viewBox: { x: 2.5, y: 2.5, width: 19, height: 19 },
+  }],
 ]);
 // Straight sections in the same view box as the curves.
 const curvedShapeSides = new Map([
   ["cylinder", [[[0, 15], [0, 85]], [[100, 15], [100, 85]]]],
   ["roundedRect", [[[15, 0], [85, 0]], [[100, 15], [100, 85]], [[85, 100], [15, 100]], [[0, 85], [0, 15]]]],
   ["cloud", [[[22, 100], [78, 100]]]],
+  ["serverRack", [[[4, 3], [20, 3]], [[21, 4], [21, 20]], [[20, 21], [4, 21]], [[3, 20], [3, 4]]]],
+  ["laptop", [
+    [[5, 4], [19, 4]], [[20, 5], [20, 15]], [[20, 15], [22.5, 19]],
+    [[21.5, 20], [2.5, 20]], [[1.5, 19], [4, 15]], [[4, 15], [4, 5]],
+  ]],
+  ["textFile", [[[5, 2.5], [14, 2.5]], [[14, 2.5], [19, 7.5]], [[19, 7.5], [19, 21]],
+    [[18, 22], [6, 22]], [[5, 21], [5, 2.5]]]],
+  ["tensor", tensorCorners.map((corner, index) => [corner, tensorCorners[(index + 1) % tensorCorners.length]])],
+  ["queue", [[[3, 8], [21, 8]], [[22, 9], [22, 15]], [[21, 16], [3, 16]], [[2, 15], [2, 9]]]],
+  ["chip", [[[7, 5.5], [17, 5.5]], [[18.5, 7], [18.5, 17]], [[17, 18.5], [7, 18.5]], [[5.5, 17], [5.5, 7]]]],
 ]);
 const shapeLibraryTypes = [...polygonShapes.keys(), ...curvedShapes.keys()];
 
@@ -199,25 +270,35 @@ function connectionOffset(shape, point, direction) {
 
 const curvedShapeOutlines = new Map();
 
-function connectionOutline(shape) {
-  if (polygonShapes.has(shape.type)) return polygonShapePoints(shape);
+function curvedShapeTransform(shape) {
   const { left, top, right, bottom } = rectangleBetween({ x: 0, y: 0 }, shape.end);
+  const { viewBox = defaultCurvedViewBox } = curvedShapes.get(shape.type);
+  const scaleX = (right - left) / viewBox.width;
+  const scaleY = (bottom - top) / viewBox.height;
+  return new DOMMatrix([scaleX, 0, 0, scaleY, left - viewBox.x * scaleX, top - viewBox.y * scaleY]);
+}
+
+function connectionContours(shape) {
+  if (polygonShapes.has(shape.type)) return [polygonShapePoints(shape)];
   if (shape.type === "rect") {
-    return [{ x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom }];
+    const { left, top, right, bottom } = rectangleBetween({ x: 0, y: 0 }, shape.end);
+    return [[{ x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom }]];
   }
-  // Sample only the exterior SVG path, in its original view box.
+  const { outlines, vertices } = curvedShapes.get(shape.type);
+  const { a, d, e, f } = curvedShapeTransform(shape);
+  if (vertices) return [vertices.map(([x, y]) => ({ x: a * x + e, y: d * y + f }))];
+  // Sample each closed outline separately so connections never land in a gap between contours.
   if (!curvedShapeOutlines.has(shape.type)) {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", curvedShapes.get(shape.type)[0]);
-    const length = path.getTotalLength();
-    const samples = 256;
-    curvedShapeOutlines.set(shape.type,
-      Array.from({ length: samples }, (_, index) => path.getPointAtLength(length * index / samples)));
+    const contours = outlines.map(outline => {
+      path.setAttribute("d", outline);
+      const length = path.getTotalLength();
+      const samples = 256;
+      return Array.from({ length: samples }, (_, index) => path.getPointAtLength(length * index / samples));
+    });
+    curvedShapeOutlines.set(shape.type, contours);
   }
-  return curvedShapeOutlines.get(shape.type).map(({ x, y }) => ({
-    x: left + x * (right - left) / 100,
-    y: top + y * (bottom - top) / 100,
-  }));
+  return curvedShapeOutlines.get(shape.type).map(contour => contour.map(({ x, y }) => ({ x: a * x + e, y: d * y + f })));
 }
 
 function shapeLineRange(shape, origin, axis) {
@@ -240,31 +321,32 @@ function shapeLineRange(shape, origin, axis) {
     const radius = Math.sqrt(Math.max(0, 1 - distance * distance)) / speed;
     return { min: middle - radius, max: middle + radius };
   }
-  const outline = connectionOutline(shape);
   let min = Infinity;
   let max = -Infinity;
-  let previous = outline.at(-1);
   const length = Math.hypot(dx, dy);
   const lengthSquared = length * length;
-  for (const point of outline) {
-    const x = previous.x - local.x;
-    const y = previous.y - local.y;
-    const nextX = point.x - local.x;
-    const nextY = point.y - local.y;
-    const side = (dx * y - dy * x) / length;
-    const nextSide = (dx * nextY - dy * nextX) / length;
-    if (Math.abs(side) < 1e-7) {
-      const hit = (x * dx + y * dy) / lengthSquared;
-      min = Math.min(min, hit);
-      max = Math.max(max, hit);
+  for (const outline of connectionContours(shape)) {
+    let previous = outline.at(-1);
+    for (const point of outline) {
+      const x = previous.x - local.x;
+      const y = previous.y - local.y;
+      const nextX = point.x - local.x;
+      const nextY = point.y - local.y;
+      const side = (dx * y - dy * x) / length;
+      const nextSide = (dx * nextY - dy * nextX) / length;
+      if (Math.abs(side) < 1e-7) {
+        const hit = (x * dx + y * dy) / lengthSquared;
+        min = Math.min(min, hit);
+        max = Math.max(max, hit);
+      }
+      if (side * nextSide < 0) {
+        const ratio = side / (side - nextSide);
+        const hit = ((x + (nextX - x) * ratio) * dx + (y + (nextY - y) * ratio) * dy) / lengthSquared;
+        min = Math.min(min, hit);
+        max = Math.max(max, hit);
+      }
+      previous = point;
     }
-    if (side * nextSide < 0) {
-      const ratio = side / (side - nextSide);
-      const hit = ((x + (nextX - x) * ratio) * dx + (y + (nextY - y) * ratio) * dy) / lengthSquared;
-      min = Math.min(min, hit);
-      max = Math.max(max, hit);
-    }
-    previous = point;
   }
   return min <= max ? { min, max } : null;
 }
@@ -277,7 +359,8 @@ function shapeConnectionGeometry(shape) {
   const geometry = { corner: [], side: [], midpoint: [] };
   if (!shape.end.x || !shape.end.y) return geometry;
   if (shape.type === "rect" || polygonShapes.has(shape.type)) {
-    const outline = connectionOutline(shape);
+    geometry.sideMidpoints = true;
+    const [outline] = connectionContours(shape);
     const vertices = outline.map(point => objectToWorld(shape, point));
     vertices.forEach((point, index) => {
       const key = outline[index].connectionIndex ?? index;
@@ -290,9 +373,18 @@ function shapeConnectionGeometry(shape) {
     return geometry;
   }
 
-  const { left, top, right, bottom } = rectangleBetween({ x: 0, y: 0 }, shape.end);
-  geometry.side = (curvedShapeSides.get(shape.type) ?? []).map(side => side.map(([x, y]) =>
-    objectToWorld(shape, { x: left + x * (right - left) / 100, y: top + y * (bottom - top) / 100 })));
+  const curved = curvedShapes.get(shape.type);
+  if (curved) {
+    const { a, d, e, f } = curvedShapeTransform(shape);
+    const project = ([x, y]) => objectToWorld(shape, { x: a * x + e, y: d * y + f });
+    geometry.side = (curvedShapeSides.get(shape.type) ?? []).map(side => side.map(project));
+    const corners = curved.corners ?? curved.vertices;
+    if (corners) geometry.corner = corners.map(project);
+    if (curved.markers) {
+      geometry.midpoint = curved.markers.map(project);
+      return geometry;
+    }
+  }
   const center = shapeCenter(shape);
   const { a, b, c, d } = objectMatrix(shape);
   [{ x: a, y: b }, { x: c, y: d }].forEach((axis, index) => {
@@ -305,7 +397,7 @@ function shapeConnectionGeometry(shape) {
 }
 
 function isConnectionAnchor(anchor) {
-  return typeof anchor === "string" && /^(corner|side|midpoint):[0-6]$/.test(anchor);
+  return typeof anchor === "string" && /^(corner|side|midpoint):(?:0|[1-9][0-9]?)$/.test(anchor);
 }
 
 function connectionAnchorGeometry(geometry, anchor) {
@@ -322,7 +414,7 @@ function projectOntoSide([start, end], point) {
 
 function shapeConnectionMarkers(geometry, minimumSideLength) {
   return geometry.midpoint.flatMap((point, index) => {
-    const side = geometry.corner.length && geometry.side[index];
+    const side = geometry.sideMidpoints && geometry.side[index];
     return !side || distanceBetween(...side) >= minimumSideLength ? [{ point, index }] : [];
   });
 }
@@ -353,7 +445,7 @@ function shapeProjectionRange(shape, axis) {
     return { min: middle - radius, max: middle + radius };
   }
   const origin = projection(shape, axis);
-  const offsets = connectionOutline(shape).map(point => projection(point, localAxis));
+  const offsets = connectionContours(shape).flatMap(outline => outline.map(point => projection(point, localAxis)));
   return { min: origin + Math.min(...offsets), max: origin + Math.max(...offsets) };
 }
 
@@ -604,7 +696,8 @@ function updateShape(object, point, constrained = false) {
   if (constrained && isSegment(object)) point = snapSegmentEnd(object, point);
   const end = { x: point.x - object.x, y: point.y - object.y };
   if (object.type === "hexagon" || (constrained && isFillableShape(object.type))) {
-    const heightToWidth = object.type === "hexagon" ? Math.sqrt(3) / 2 : 1;
+    const viewBox = curvedShapes.get(object.type)?.viewBox;
+    const heightToWidth = viewBox ? viewBox.height / viewBox.width : object.type === "hexagon" ? Math.sqrt(3) / 2 : 1;
     const width = Math.max(Math.abs(end.x), Math.abs(end.y) / heightToWidth);
     end.x = Math.sign(end.x || 1) * width;
     end.y = Math.sign(end.y || 1) * width * heightToWidth;
@@ -643,9 +736,9 @@ function setShapeEnd(object, end) {
       bottom: Math.max(...points.map(point => point.y)),
     };
   } else if (curvedShapes.has(object.type)) {
-    const [outline, detail] = curvedShapes.get(object.type);
-    const transform = new DOMMatrix([width / 100, 0, 0, height / 100, bounds.left, bounds.top]);
-    path.addPath(new Path2D(outline), transform);
+    const { outlines, detail } = curvedShapes.get(object.type);
+    const transform = curvedShapeTransform(object);
+    for (const outline of outlines) path.addPath(new Path2D(outline), transform);
     if (detail) {
       object.detailPath = new Path2D();
       object.detailPath.addPath(new Path2D(detail), transform);
