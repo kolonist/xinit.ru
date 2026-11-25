@@ -113,17 +113,15 @@
   box-shadow: 0 14px 28px #0007;
 }
 
-.home-paint-laser {
+.home-paint-animation {
   position: absolute;
-  /* The overlay covers the title and the highlighted lines in the ticket. */
-  left: calc(100% * 156 / 1140);
-  top: calc(100% * 58 / 708);
-  width: calc(100% * 814 / 1140);
+  inset: 0;
+  width: 100%;
   height: auto;
   pointer-events: none;
 }
 
-.home-paint-laser-toggle {
+.home-paint-animation-toggle {
   padding: 0;
   border: 0;
   background: transparent;
@@ -134,8 +132,8 @@
   cursor: pointer;
 }
 
-.home-paint-laser-toggle:hover { color: var(--accent); }
+.home-paint-animation-toggle:hover { color: var(--accent); }
 
 @media (prefers-reduced-motion: reduce) {
-  .home-paint-laser, .home-paint-laser-toggle { display: none; }
+  .home-paint-animation, .home-paint-animation-toggle { display: none; }
 }
