@@ -140,7 +140,9 @@ function snapSegmentEnd(anchor, point) {
 }
 
 function createObject(type, point, color) {
-  return { type, x: point.x, y: point.y, color, scaleX: 1, scaleY: 1 };
+  const object = { type, x: point.x, y: point.y, color, scaleX: 1, scaleY: 1 };
+  if (isFillableShape(type)) object.shapeId = crypto.randomUUID();
+  return object;
 }
 
 function isFillableShape(type) {
@@ -153,6 +155,209 @@ function isSegment(object) {
 
 function hasLineEnds(object) {
   return isSegment(object) || object?.type === "polyline";
+}
+
+function hasLineConnections(object) {
+  return Boolean(object.startShapeId || object.endShapeId);
+}
+
+function lineVertices(object) {
+  return object.type === "polyline" ? object.points : [{ x: 0, y: 0 }, object.end];
+}
+
+function shapeCenter(shape) {
+  return objectToWorld(shape, { x: shape.end.x / 2, y: shape.end.y / 2 });
+}
+
+const connectionAxes = [{ x: 1, y: 0 }, { x: Math.SQRT1_2, y: Math.SQRT1_2 },
+  { x: 0, y: 1 }, { x: -Math.SQRT1_2, y: Math.SQRT1_2 }];
+
+function connectionDirection(from, to) {
+  const step = Math.round(Math.atan2(to.y - from.y, to.x - from.x) / (Math.PI / 4));
+  return (step + 4) % 4;
+}
+
+function projection(point, axis) {
+  return point.x * axis.x + point.y * axis.y;
+}
+
+function perpendicular(axis) {
+  return { x: -axis.y, y: axis.x };
+}
+
+function connectionOffset(shape, point, direction) {
+  const axis = perpendicular(connectionAxes[direction]);
+  return projection(point, axis) - projection(shapeCenter(shape), axis);
+}
+
+const curvedShapeOutlines = new Map();
+
+function connectionOutline(shape) {
+  if (polygonShapes.has(shape.type)) return polygonShapePoints(shape);
+  const { left, top, right, bottom } = rectangleBetween({ x: 0, y: 0 }, shape.end);
+  if (shape.type === "rect") {
+    return [{ x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom }];
+  }
+  // Sample only the exterior SVG path, in its original view box.
+  if (!curvedShapeOutlines.has(shape.type)) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", curvedShapes.get(shape.type)[0]);
+    const length = path.getTotalLength();
+    const samples = 256;
+    curvedShapeOutlines.set(shape.type,
+      Array.from({ length: samples }, (_, index) => path.getPointAtLength(length * index / samples)));
+  }
+  return curvedShapeOutlines.get(shape.type).map(({ x, y }) => ({
+    x: left + x * (right - left) / 100,
+    y: top + y * (bottom - top) / 100,
+  }));
+}
+
+function shapeLineRange(shape, origin, axis) {
+  const center = { x: shape.end.x / 2, y: shape.end.y / 2 };
+  if (!center.x || !center.y) return null;
+  const local = worldToObject(shape, origin);
+  const { a, b, c, d } = objectMatrix(shape);
+  const determinant = a * d - b * c;
+  const dx = (d * axis.x - c * axis.y) / determinant;
+  const dy = (a * axis.y - b * axis.x) / determinant;
+  if (shape.type === "circle") {
+    const x = (local.x - center.x) / center.x;
+    const y = (local.y - center.y) / center.y;
+    const u = dx / center.x;
+    const v = dy / center.y;
+    const speed = Math.hypot(u, v);
+    const distance = (x * v - y * u) / speed;
+    if (Math.abs(distance) > 1 + 1e-9) return null;
+    const middle = -(x * u + y * v) / (speed * speed);
+    const radius = Math.sqrt(Math.max(0, 1 - distance * distance)) / speed;
+    return { min: middle - radius, max: middle + radius };
+  }
+  const outline = connectionOutline(shape);
+  let min = Infinity;
+  let max = -Infinity;
+  let previous = outline.at(-1);
+  const length = Math.hypot(dx, dy);
+  const lengthSquared = length * length;
+  for (const point of outline) {
+    const x = previous.x - local.x;
+    const y = previous.y - local.y;
+    const nextX = point.x - local.x;
+    const nextY = point.y - local.y;
+    const side = (dx * y - dy * x) / length;
+    const nextSide = (dx * nextY - dy * nextX) / length;
+    if (Math.abs(side) < 1e-7) {
+      const hit = (x * dx + y * dy) / lengthSquared;
+      min = Math.min(min, hit);
+      max = Math.max(max, hit);
+    }
+    if (side * nextSide < 0) {
+      const ratio = side / (side - nextSide);
+      const hit = ((x + (nextX - x) * ratio) * dx + (y + (nextY - y) * ratio) * dy) / lengthSquared;
+      min = Math.min(min, hit);
+      max = Math.max(max, hit);
+    }
+    previous = point;
+  }
+  return min <= max ? { min, max } : null;
+}
+
+function pointAlong(origin, axis, distance) {
+  return { x: origin.x + axis.x * distance, y: origin.y + axis.y * distance };
+}
+
+function connectionPoint(shape, toward, fallback, direction) {
+  if (direction != null) {
+    const axis = connectionAxes[direction];
+    const range = shapeLineRange(shape, toward, axis);
+    if (range) {
+      const distance = Math.abs(range.min) < Math.abs(range.max) ? range.min : range.max;
+      return pointAlong(toward, axis, distance);
+    }
+  }
+  const center = shapeCenter(shape);
+  if (distanceBetween(center, toward) < 1e-7 && fallback) toward = fallback;
+  if (distanceBetween(center, toward) < 1e-7) toward = objectToWorld(shape, { x: 0, y: shape.end.y / 2 });
+  const axis = { x: toward.x - center.x, y: toward.y - center.y };
+  const range = shapeLineRange(shape, center, axis);
+  return range ? pointAlong(center, axis, range.max) : fallback;
+}
+
+function shapeProjectionRange(shape, axis) {
+  const { a, b, c, d } = objectMatrix(shape);
+  const localAxis = { x: a * axis.x + b * axis.y, y: c * axis.x + d * axis.y };
+  if (shape.type === "circle") {
+    const middle = projection(shapeCenter(shape), axis);
+    const radius = Math.hypot(shape.end.x / 2 * localAxis.x, shape.end.y / 2 * localAxis.y);
+    return { min: middle - radius, max: middle + radius };
+  }
+  const origin = projection(shape, axis);
+  const offsets = connectionOutline(shape).map(point => projection(point, localAxis));
+  return { min: origin + Math.min(...offsets), max: origin + Math.max(...offsets) };
+}
+
+function parallelConnections(startShape, endShape, direction, offset) {
+  const axis = connectionAxes[direction];
+  const normal = perpendicular(axis);
+  const startRange = shapeProjectionRange(startShape, normal);
+  const endRange = shapeProjectionRange(endShape, normal);
+  const min = Math.max(startRange.min, endRange.min);
+  const max = Math.min(startRange.max, endRange.max);
+  if (min > max + 1e-7) return null;
+  const start = shapeCenter(startShape);
+  const startOffset = projection(start, normal);
+  const sharedOffset = Math.min(max, Math.max(min, startOffset + (offset ?? 0)));
+  const origin = pointAlong(start, normal, sharedOffset - startOffset);
+  const first = shapeLineRange(startShape, origin, axis);
+  const last = shapeLineRange(endShape, origin, axis);
+  if (!first || !last) return null;
+  const forward = projection(shapeCenter(endShape), axis) >= projection(start, axis);
+  return [pointAlong(origin, axis, forward ? first.max : first.min),
+    pointAlong(origin, axis, forward ? last.min : last.max)];
+}
+
+function updateLineConnections(line, startShape, endShape) {
+  if (!startShape && !endShape) return;
+  const vertices = lineVertices(line);
+  if (vertices.length < 2) return;
+  const start = objectToWorld(line, vertices[0]);
+  const end = objectToWorld(line, vertices.at(-1));
+  const bothEnds = vertices.length === 2 && startShape && endShape;
+  const direction = line.startConnectionDirection ?? line.endConnectionDirection;
+  const parallel = bothEnds && direction != null
+    ? parallelConnections(startShape, endShape, direction, line.connectionOffset) : null;
+  const next = bothEnds ? shapeCenter(endShape) : objectToWorld(line, vertices[1]);
+  const previous = bothEnds ? shapeCenter(startShape) : objectToWorld(line, vertices.at(-2));
+  const connectedStart = parallel?.[0] ?? (startShape
+    ? connectionPoint(startShape, next, start, bothEnds ? undefined : line.startConnectionDirection) : start);
+  const connectedEnd = parallel?.[1] ?? (endShape
+    ? connectionPoint(endShape, previous, end, bothEnds ? undefined : line.endConnectionDirection) : end);
+  const startChanged = distanceBetween(start, connectedStart) > 1e-7;
+  const endChanged = distanceBetween(end, connectedEnd) > 1e-7;
+  if (!startChanged && !endChanged) return;
+  if (isSegment(line)) {
+    Object.assign(line, connectedStart);
+    setShapeEnd(line, worldToObject(line, connectedEnd));
+  } else {
+    const points = vertices.slice();
+    if (startChanged) points[0] = worldToObject(line, connectedStart);
+    if (endChanged) points[points.length - 1] = worldToObject(line, connectedEnd);
+    setPolylinePoints(line, points);
+  }
+}
+
+function syncLineConnections(objects, clearMissing = false) {
+  if (!objects.some(hasLineConnections)) return;
+  const shapes = new Map(objects.filter(object => object.shapeId).map(object => [object.shapeId, object]));
+  for (const line of objects) {
+    if (!hasLineConnections(line)) continue;
+    const start = shapes.get(line.startShapeId);
+    const end = shapes.get(line.endShapeId);
+    updateLineConnections(line, start, end);
+    if (clearMissing && !start) line.startShapeId = line.startConnectionDirection = undefined;
+    if (clearMissing && !end) line.endShapeId = line.endConnectionDirection = undefined;
+    if (clearMissing && (!start || !end)) line.connectionOffset = undefined;
+  }
 }
 
 function addLineArrows(object, points, bounds) {

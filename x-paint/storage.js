@@ -129,8 +129,11 @@ function migratePaintScene(database, key) {
 function savePaintObject(object) {
   const { type, x, y, scaleX, scaleY, color, fill, fillTransparency, end, points, text, blob, source, groupId } = object;
   const { angle, shear, weight, lineStyle, shapeAdjustments, lineEnds } = object;
+  const { shapeId, startShapeId, endShapeId } = object;
+  const { startConnectionDirection, endConnectionDirection, connectionOffset } = object;
   return { type, x, y, scaleX, scaleY, color, fill, fillTransparency, end, points, text, blob, source,
-    groupId, angle, shear, weight, lineStyle, shapeAdjustments, lineEnds };
+    groupId, angle, shear, weight, lineStyle, shapeAdjustments, lineEnds, shapeId, startShapeId, endShapeId,
+    startConnectionDirection, endConnectionDirection, connectionOffset };
 }
 
 async function restorePaintObject(saved, context) {
@@ -177,5 +180,13 @@ async function restorePaintObject(saved, context) {
   object.angle = saved.angle ?? 0;
   object.shear = saved.shear ?? 0;
   if (saved.groupId) object.groupId = saved.groupId;
+  if (object.shapeId && saved.shapeId) object.shapeId = saved.shapeId;
+  if (hasLineEnds(object)) {
+    object.startShapeId = saved.startShapeId;
+    object.endShapeId = saved.endShapeId;
+    object.startConnectionDirection = saved.startConnectionDirection;
+    object.endConnectionDirection = saved.endConnectionDirection;
+    object.connectionOffset = saved.connectionOffset;
+  }
   return object;
 }

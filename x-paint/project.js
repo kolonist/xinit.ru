@@ -26,6 +26,10 @@ function packPaintProject(scene, forLink = false) {
     parts.push(part);
     return range;
   }
+  const shapeIndexes = new Map();
+  scene.objects.forEach((object, index) => {
+    if (object.shapeId) shapeIndexes.set(object.shapeId, index);
+  });
   const records = scene.objects.map(object => {
     const { type, x, y, color, points, end, text, blob, source, weight } = object;
     let data;
@@ -52,6 +56,16 @@ function packPaintProject(scene, forLink = false) {
       object.shapeAdjustments,
       object.lineEnds || null,
     ];
+    const startIndex = shapeIndexes.get(object.startShapeId);
+    const endIndex = shapeIndexes.get(object.endShapeId);
+    if (startIndex != null || endIndex != null) {
+      options.push([startIndex, endIndex]);
+      const startDirection = startIndex != null ? object.startConnectionDirection : undefined;
+      const endDirection = endIndex != null ? object.endConnectionDirection : undefined;
+      if (startDirection != null || endDirection != null) {
+        options.push([startDirection, endDirection, startIndex != null && endIndex != null ? object.connectionOffset : null]);
+      }
+    }
     while (options.length && options.at(-1) == null) options.pop();
     const record = [paintProjectTypes.indexOf(type), x, y, color, data];
     if (options.length) record.push(options);
@@ -175,7 +189,8 @@ async function unpackPaintProject(project) {
     checkPaintProject(Array.isArray(record));
     const [kind, x, y, color, data, options = []] = record;
     checkPaintProject(Array.isArray(options) && Number.isInteger(kind) && paintProjectTypes[kind]);
-    const [scaleX, scaleY, angle, shear, fill, transparency, groupId, weight, line, savedShapeAdjustments, savedLineEnds] = options;
+    const [scaleX, scaleY, angle, shear, fill, transparency, groupId, weight, line, savedShapeAdjustments,
+      savedLineEnds, connections, directions] = options;
     const type = paintProjectTypes[kind];
     checkPaintProject([x, y, scaleX ?? 1, scaleY ?? 1, angle ?? 0, shear ?? 0].every(Number.isFinite) &&
       (scaleX ?? 1) !== 0 && (scaleY ?? 1) !== 0 && (type === "image" || isPaintProjectColor(color)) &&
@@ -190,6 +205,21 @@ async function unpackPaintProject(project) {
     if (savedLineEnds != null) {
       checkPaintProject(hasLineEnds(object) && Number.isInteger(savedLineEnds) && savedLineEnds >= 0 && savedLineEnds <= 3);
       object.lineEnds = savedLineEnds;
+    }
+    if (connections != null) {
+      checkPaintProject(hasLineEnds(object) && Array.isArray(connections) && connections.length === 2 &&
+        connections.every(index => index == null || (Number.isInteger(index) && index >= 0 && index < records.length)));
+    }
+    if (directions != null) {
+      checkPaintProject(connections && Array.isArray(directions) && directions.length === 3);
+      const [start, end, offset] = directions;
+      const validDirection = (direction, index) => direction == null ||
+        (index != null && Number.isInteger(direction) && direction >= 0 && direction < connectionAxes.length);
+      checkPaintProject(validDirection(start, connections[0]) && validDirection(end, connections[1]) &&
+        (offset == null || (Number.isFinite(offset) && connections.every(index => index != null))));
+      object.startConnectionDirection = start ?? undefined;
+      object.endConnectionDirection = end ?? undefined;
+      object.connectionOffset = offset ?? undefined;
     }
     if (type === "text") {
       checkPaintProject(typeof data === "string");
@@ -224,6 +254,17 @@ async function unpackPaintProject(project) {
     }
     return object;
   }));
+  records.forEach((record, index) => {
+    const connections = record[5]?.[11];
+    if (!connections) return;
+    for (const [end, targetIndex] of connections.entries()) {
+      if (targetIndex == null) continue;
+      const target = objects[targetIndex];
+      checkPaintProject(isFillableShape(target.type));
+      target.shapeId ??= crypto.randomUUID();
+      objects[index][end === 0 ? "startShapeId" : "endShapeId"] = target.shapeId;
+    }
+  });
   return { objects, view: { x: viewX, y: viewY, zoom }, color, backgroundColor, fillEnabled, fillTransparency,
     strokeWeights: { stroke, marker }, lineStyle: paintProjectLineStyles[style], lineEnds };
 }
