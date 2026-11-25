@@ -131,9 +131,10 @@ function savePaintObject(object) {
   const { angle, shear, weight, lineStyle, shapeAdjustments, lineEnds } = object;
   const { shapeId, startShapeId, endShapeId, labelShapeId } = object;
   const { startConnectionDirection, endConnectionDirection, connectionOffset } = object;
+  const { startConnectionAnchor, endConnectionAnchor } = object;
   return { type, x, y, scaleX, scaleY, color, fill, fillTransparency, end, points, text, blob, source,
     groupId, angle, shear, weight, lineStyle, shapeAdjustments, lineEnds, shapeId, startShapeId, endShapeId,
-    startConnectionDirection, endConnectionDirection, connectionOffset, labelShapeId };
+    startConnectionDirection, endConnectionDirection, connectionOffset, startConnectionAnchor, endConnectionAnchor, labelShapeId };
 }
 
 async function restorePaintObject(saved, context) {
@@ -188,6 +189,8 @@ async function restorePaintObject(saved, context) {
     object.startConnectionDirection = saved.startConnectionDirection;
     object.endConnectionDirection = saved.endConnectionDirection;
     object.connectionOffset = saved.connectionOffset;
+    object.startConnectionAnchor = saved.startConnectionAnchor;
+    object.endConnectionAnchor = saved.endConnectionAnchor;
   }
   return object;
 }

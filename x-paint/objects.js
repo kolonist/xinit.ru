@@ -49,10 +49,17 @@ const curvedShapes = new Map([
     "C66 8 73 6 80 12C89 18 93 31 92 45C97 50 100 59 100 70C100 87 91 100 78 100Z",
   ]],
 ]);
+// Straight sections in the same view box as the curves.
+const curvedShapeSides = new Map([
+  ["cylinder", [[[0, 15], [0, 85]], [[100, 15], [100, 85]]]],
+  ["roundedRect", [[[15, 0], [85, 0]], [[100, 15], [100, 85]], [[85, 100], [15, 100]], [[0, 85], [0, 15]]]],
+  ["cloud", [[[22, 100], [78, 100]]]],
+]);
 const shapeLibraryTypes = [...polygonShapes.keys(), ...curvedShapes.keys()];
 
 function calloutOutline({ tailX, tailY } = calloutDefaults) {
-  const corners = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  // Keep the rectangular corners and the tail addressable as the tail changes sides.
+  const corners = [[0, 0, 0], [1, 0, 1], [1, 1, 2], [0, 1, 3]];
   const dx = tailX - 0.5;
   const dy = tailY - 0.5;
   const distance = Math.max(Math.abs(dx), Math.abs(dy));
@@ -64,7 +71,7 @@ function calloutOutline({ tailX, tailY } = calloutDefaults) {
   const along = ((nextX - x) * dx + (nextY - y) * dy) / (2 * distance);
   const center = Math.max(0.15, Math.min(0.85, 0.5 + along));
   const basePoint = fraction => [x + (nextX - x) * fraction, y + (nextY - y) * fraction];
-  corners.splice(side + 1, 0, basePoint(center - 0.1), [tailX, tailY], basePoint(center + 0.1));
+  corners.splice(side + 1, 0, [...basePoint(center - 0.1), 4], [tailX, tailY, 5], [...basePoint(center + 0.1), 6]);
   return corners;
 }
 
@@ -266,6 +273,60 @@ function pointAlong(origin, axis, distance) {
   return { x: origin.x + axis.x * distance, y: origin.y + axis.y * distance };
 }
 
+function shapeConnectionGeometry(shape) {
+  const geometry = { corner: [], side: [], midpoint: [] };
+  if (!shape.end.x || !shape.end.y) return geometry;
+  if (shape.type === "rect" || polygonShapes.has(shape.type)) {
+    const outline = connectionOutline(shape);
+    const vertices = outline.map(point => objectToWorld(shape, point));
+    vertices.forEach((point, index) => {
+      const key = outline[index].connectionIndex ?? index;
+      const next = vertices[(index + 1) % vertices.length];
+      geometry.corner[key] = point;
+      if (distanceBetween(point, next) < 1e-7) return;
+      geometry.side[key] = [point, next];
+      geometry.midpoint[key] = { x: (point.x + next.x) / 2, y: (point.y + next.y) / 2 };
+    });
+    return geometry;
+  }
+
+  const { left, top, right, bottom } = rectangleBetween({ x: 0, y: 0 }, shape.end);
+  geometry.side = (curvedShapeSides.get(shape.type) ?? []).map(side => side.map(([x, y]) =>
+    objectToWorld(shape, { x: left + x * (right - left) / 100, y: top + y * (bottom - top) / 100 })));
+  const center = shapeCenter(shape);
+  const { a, b, c, d } = objectMatrix(shape);
+  [{ x: a, y: b }, { x: c, y: d }].forEach((axis, index) => {
+    const range = shapeLineRange(shape, center, axis);
+    if (!range) return;
+    geometry.midpoint[index * 2] = pointAlong(center, axis, range.min);
+    geometry.midpoint[index * 2 + 1] = pointAlong(center, axis, range.max);
+  });
+  return geometry;
+}
+
+function isConnectionAnchor(anchor) {
+  return typeof anchor === "string" && /^(corner|side|midpoint):[0-6]$/.test(anchor);
+}
+
+function connectionAnchorGeometry(geometry, anchor) {
+  if (!anchor) return null;
+  const [kind, index] = anchor.split(":");
+  return geometry[kind]?.[index];
+}
+
+function projectOntoSide([start, end], point) {
+  const axis = { x: end.x - start.x, y: end.y - start.y };
+  const fraction = projection({ x: point.x - start.x, y: point.y - start.y }, axis) / projection(axis, axis);
+  return pointAlong(start, axis, Math.min(1, Math.max(0, fraction)));
+}
+
+function shapeConnectionMarkers(geometry, minimumSideLength) {
+  return geometry.midpoint.flatMap((point, index) => {
+    const side = geometry.corner.length && geometry.side[index];
+    return !side || distanceBetween(...side) >= minimumSideLength ? [{ point, index }] : [];
+  });
+}
+
 function connectionPoint(shape, toward, fallback, direction) {
   if (direction != null) {
     const axis = connectionAxes[direction];
@@ -323,15 +384,36 @@ function updateLineConnections(line, startShape, endShape) {
   const start = objectToWorld(line, vertices[0]);
   const end = objectToWorld(line, vertices.at(-1));
   const bothEnds = vertices.length === 2 && startShape && endShape;
+  const startAnchor = startShape && line.startConnectionAnchor &&
+    connectionAnchorGeometry(shapeConnectionGeometry(startShape), line.startConnectionAnchor);
+  const endAnchor = endShape && line.endConnectionAnchor &&
+    connectionAnchorGeometry(shapeConnectionGeometry(endShape), line.endConnectionAnchor);
   const direction = line.startConnectionDirection ?? line.endConnectionDirection;
-  const parallel = bothEnds && direction != null
+  const parallel = bothEnds && !startAnchor && !endAnchor && direction != null
     ? parallelConnections(startShape, endShape, direction, line.connectionOffset) : null;
   const next = bothEnds ? shapeCenter(endShape) : objectToWorld(line, vertices[1]);
   const previous = bothEnds ? shapeCenter(startShape) : objectToWorld(line, vertices.at(-2));
-  const connectedStart = parallel?.[0] ?? (startShape
-    ? connectionPoint(startShape, next, start, bothEnds ? undefined : line.startConnectionDirection) : start);
-  const connectedEnd = parallel?.[1] ?? (endShape
-    ? connectionPoint(endShape, previous, end, bothEnds ? undefined : line.endConnectionDirection) : end);
+  let connectedStart = parallel?.[0] || startAnchor;
+  let connectedEnd = parallel?.[1] || endAnchor;
+  // Project in canvas coordinates. If two sides disagree, favor a right angle at the end.
+  if (Array.isArray(connectedEnd)) connectedEnd = projectOntoSide(connectedEnd, previous);
+  if (Array.isArray(connectedStart)) connectedStart = projectOntoSide(connectedStart, (bothEnds && connectedEnd) || next);
+  if (Array.isArray(endAnchor) && bothEnds && connectedStart) {
+    connectedEnd = projectOntoSide(endAnchor, connectedStart);
+  }
+  if (!connectedStart) {
+    const followDirection = !bothEnds || (endAnchor && !Array.isArray(endAnchor));
+    connectedStart = startShape
+      ? connectionPoint(startShape, (bothEnds && connectedEnd) || next, start, followDirection ? line.startConnectionDirection : undefined)
+      : start;
+  }
+  if (!connectedEnd) {
+    const followDirection = !bothEnds || (startAnchor && !Array.isArray(startAnchor));
+    connectedEnd = endShape
+      ? connectionPoint(endShape, (bothEnds && startAnchor && connectedStart) || previous, end,
+        followDirection ? line.endConnectionDirection : undefined)
+      : end;
+  }
   const startChanged = distanceBetween(start, connectedStart) > 1e-7;
   const endChanged = distanceBetween(end, connectedEnd) > 1e-7;
   if (!startChanged && !endChanged) return;
@@ -354,8 +436,8 @@ function syncLineConnections(objects, clearMissing = false) {
     const start = shapes.get(line.startShapeId);
     const end = shapes.get(line.endShapeId);
     updateLineConnections(line, start, end);
-    if (clearMissing && !start) line.startShapeId = line.startConnectionDirection = undefined;
-    if (clearMissing && !end) line.endShapeId = line.endConnectionDirection = undefined;
+    if (clearMissing && !start) line.startShapeId = line.startConnectionDirection = line.startConnectionAnchor = undefined;
+    if (clearMissing && !end) line.endShapeId = line.endConnectionDirection = line.endConnectionAnchor = undefined;
     if (clearMissing && (!start || !end)) line.connectionOffset = undefined;
   }
 }
@@ -432,9 +514,10 @@ function polygonShapePoints({ type, end, shapeAdjustments }) {
   const left = Math.min(0, end.x);
   const top = Math.min(0, end.y);
   const flip = type === "blockArrow" && end.x < 0;
-  return polygonShapes.get(type)(shapeAdjustments).map(([x, y]) => ({
+  return polygonShapes.get(type)(shapeAdjustments).map(([x, y, connectionIndex]) => ({
     x: left + (flip ? 1 - x : x) * width,
     y: top + y * height,
+    connectionIndex,
   }));
 }
 

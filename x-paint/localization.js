@@ -150,6 +150,8 @@ const paintTranslations = {
   ],
   touchDrawHint: ["Два пальца для зума и перемещения", "Two fingers to zoom and pan"],
   selectHint: ["Круглая ручка — поворот · углы — размер", "Round handle to rotate · corners to resize"],
+  connectionAreasHint: ["Внутри — контур · сторона — 90° · угол или маркер — точка",
+    "Inside — outline · side — 90° · corner / marker — point"],
   endpointsHint: ["Перетащите конец к фигуре для привязки", "Drag an endpoint to a shape to connect"],
   endpointsSnapHint: ["Потяните за конец · {modifier} — шаг привязки 45° · Shift — без привязки",
     "Drag an endpoint · {modifier} binds at 45° steps · Shift skips binding"],

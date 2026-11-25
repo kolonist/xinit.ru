@@ -65,6 +65,9 @@ function packPaintProject(scene, forLink = false) {
       if (startDirection != null || endDirection != null) {
         options.push([startDirection, endDirection, startIndex != null && endIndex != null ? object.connectionOffset : null]);
       }
+      const startAnchor = startIndex != null ? object.startConnectionAnchor : undefined;
+      const endAnchor = endIndex != null ? object.endConnectionAnchor : undefined;
+      if (startAnchor || endAnchor) options[14] = [startAnchor, endAnchor];
     }
     if (object.labelShapeId !== undefined) options[13] = shapeIndexes.get(object.labelShapeId) ?? -1;
     while (options.length && options.at(-1) == null) options.pop();
@@ -191,7 +194,7 @@ async function unpackPaintProject(project) {
     const [kind, x, y, color, data, options = []] = record;
     checkPaintProject(Array.isArray(options) && Number.isInteger(kind) && paintProjectTypes[kind]);
     const [scaleX, scaleY, angle, shear, fill, transparency, groupId, weight, line, savedShapeAdjustments,
-      savedLineEnds, connections, directions] = options;
+      savedLineEnds, connections, directions, , anchors] = options;
     const type = paintProjectTypes[kind];
     checkPaintProject([x, y, scaleX ?? 1, scaleY ?? 1, angle ?? 0, shear ?? 0].every(Number.isFinite) &&
       (scaleX ?? 1) !== 0 && (scaleY ?? 1) !== 0 && (type === "image" || isPaintProjectColor(color)) &&
@@ -221,6 +224,12 @@ async function unpackPaintProject(project) {
       object.startConnectionDirection = start ?? undefined;
       object.endConnectionDirection = end ?? undefined;
       object.connectionOffset = offset ?? undefined;
+    }
+    if (anchors != null) {
+      checkPaintProject(connections && Array.isArray(anchors) && anchors.length === 2 &&
+        anchors.every((anchor, index) => anchor == null || (connections[index] != null && isConnectionAnchor(anchor))));
+      object.startConnectionAnchor = anchors[0] ?? undefined;
+      object.endConnectionAnchor = anchors[1] ?? undefined;
     }
     if (type === "text") {
       checkPaintProject(typeof data === "string");

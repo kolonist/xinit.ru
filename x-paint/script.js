@@ -75,7 +75,8 @@ const undoHistory = [];
 const undoLimit = 42;
 const editableProperties = ["x", "y", "scaleX", "scaleY", "angle", "shear", "color", "fill",
   "fillTransparency", "groupId", "text", "source", "weight", "end", "lineStyle", "shapeAdjustments", "lineEnds", "points",
-  "startShapeId", "endShapeId", "startConnectionDirection", "endConnectionDirection", "connectionOffset", "labelShapeId"];
+  "startShapeId", "endShapeId", "startConnectionDirection", "endConnectionDirection", "connectionOffset",
+  "startConnectionAnchor", "endConnectionAnchor", "labelShapeId"];
 const propertyDefaults = { angle: 0, shear: 0, fill: null, fillTransparency: 0, lineEnds: 0 };
 let committedObjects = [];
 const view = { x: 0, y: 0, zoom: 1 };
@@ -107,7 +108,7 @@ let crop = null;
 let gesture = null;
 let draft = null;
 let polylineDraft = null;
-let polylineSnap = false;
+let lineSnap = false;
 let shiftHeld = false;
 let spaceHeld = false;
 let textEdit = null;
@@ -677,9 +678,10 @@ function updateControls() {
   if (object?.type === "parallelogram") hint = "parallelogramAdjustmentHint";
   if (crop) hint = "cropHint";
   if (textEdit) hint = "textEditHint";
-  toolHint.textContent = label(hint);
-  hintRow.toggleAttribute("data-connection-hint", !touchLayout.matches &&
-    ["segmentHint", "endpointsSnapHint", "polylineHint", "polylineEditHint"].includes(hint));
+  const showsConnectionHint = ["segmentHint", "segmentTouchHint", "endpointsSnapHint", "endpointsHint",
+    "polylineHint", "polylineTouchHint", "polylineEditHint"].includes(hint);
+  toolHint.textContent = showsConnectionHint ? `${label("connectionAreasHint")} · ${label(hint)}` : label(hint);
+  hintRow.toggleAttribute("data-connection-hint", showsConnectionHint);
 }
 
 function updateZoomControls() {
@@ -825,7 +827,7 @@ function draw(now) {
   const connectionHover = !gesture && !spaceHeld && canvasPointer && ["line", "polyline"].includes(activeTool)
     ? worldPoint(screenPoint(canvasPointer)) : null;
   const connectionTarget = !shiftHeld && (gesture ? gesture.connectionTarget : connectionHover &&
-    connectionTargetAt(connectionHover, polylineDraft?.points.length === 1 ? polylineDraft.startShapeId : undefined));
+    connectionTargetAt(connectionHover, polylineDraft?.points.length === 1 ? polylineDraft.startShapeId : undefined, lineSnap));
   if (laserPoints.length) {
     laserPoints = laserPoints.filter(point => now - point.time < laserDuration);
     if (laserPoints.length) requestDraw();
@@ -840,19 +842,15 @@ function draw(now) {
     const bounds = [];
     context.save();
     setViewTransform(context, pixelRatio);
-    if (connectionTarget) {
-      context.save();
-      context.strokeStyle = "#9ceaff";
-      context.lineWidth = 2.5 / view.zoom;
-      context.stroke(worldShapePath(connectionTarget));
-      context.restore();
-      bounds.push(padBounds(worldBounds(connectionTarget), 2 / view.zoom));
-    }
+    if (connectionTarget) bounds.push(drawConnectionTarget(connectionTarget));
     if (showDraft) {
       drawObject(context, draft);
       bounds.push(worldBounds(draft));
     }
     if (polylineDraft) bounds.push(...drawPolylineDraft(connectionHover, connectionTarget));
+    if (connectionTarget && !(showSelection && selection.has(connectionTarget.shape))) {
+      bounds.push(...drawConnectionMarkers(connectionTarget.shape));
+    }
     if (showSelection) bounds.push(...drawSelection());
     if (showMarquee) {
       drawMarquee(gesture.bounds);
@@ -888,14 +886,15 @@ function corners(bounds) {
 }
 
 function drawSelection() {
-  const line = singleSelection();
-  if (hasLineEnds(line)) return drawLineHandles(line, lineVertices(line));
-  const image = crop ? singleSelection() : null;
+  const selected = singleSelection();
+  if (hasLineEnds(selected)) return drawLineHandles(selected, lineVertices(selected));
+  const image = crop ? selected : null;
   const frame = image || selectionFrame();
   const bounds = crop || frame.bounds;
   const project = point => objectToWorld(frame, point);
   const handles = corners(bounds).map(project);
   const unit = 1 / view.zoom;
+  const markerBounds = [];
   context.save();
   if (image) {
     context.fillStyle = "#030913ad";
@@ -928,18 +927,66 @@ function drawSelection() {
     context.fill();
     context.stroke();
 
-    const shape = singleSelection();
+    const adjustments = shapeAdjustmentHandles(selected).map(({ point }) => objectToWorld(selected, point));
+    for (const shape of selection) {
+      if (shape.shapeId) markerBounds.push(...drawConnectionMarkers(shape, adjustments));
+    }
     context.fillStyle = "#ffbe79";
     context.strokeStyle = "#061324";
-    for (const { point } of shapeAdjustmentHandles(shape)) {
-      const { x, y } = objectToWorld(shape, point);
-      drawDiamond(x, y, 5 * unit);
-    }
+    for (const { x, y } of adjustments) drawDiamond(x, y, 5 * unit);
   }
   context.restore();
   const paintedBounds = image ? image.bounds : { ...bounds, top: rotationHandle(bounds).y };
   const paintedFrame = { ...frame, bounds: paintedBounds };
-  return [padBounds(worldBounds(paintedFrame), 6 * unit)];
+  return [padBounds(worldBounds(paintedFrame), 6 * unit), ...markerBounds];
+}
+
+function drawConnectionMarkers(shape, adjustments = []) {
+  const unit = 1 / view.zoom;
+  const bounds = [];
+  context.save();
+  for (const { point } of shapeConnectionMarkers(shapeConnectionGeometry(shape), 12 * unit)) {
+    const overlapsAdjustment = adjustments.some(handle => distanceBetween(handle, point) < 6 * unit);
+    const radius = (overlapsAdjustment ? 8 : 3.5) * unit;
+    context.beginPath();
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    context.strokeStyle = "#061324";
+    context.lineWidth = 3.5 * unit;
+    context.stroke();
+    context.strokeStyle = "#9ceaff";
+    context.lineWidth = 1.5 * unit;
+    context.stroke();
+    bounds.push(padBounds(rectangleBetween(point, point), radius + 2 * unit));
+  }
+  context.restore();
+  return bounds;
+}
+
+function drawConnectionTarget({ shape, guide }) {
+  const unit = 1 / view.zoom;
+  context.save();
+  context.strokeStyle = guide ? "#91f8c2" : "#9ceaff";
+  context.lineWidth = (guide ? 4 : 2.5) * unit;
+  context.lineCap = "round";
+  let bounds;
+  if (Array.isArray(guide)) {
+    const [start, end] = guide;
+    context.beginPath();
+    context.moveTo(start.x, start.y);
+    context.lineTo(end.x, end.y);
+    context.stroke();
+    bounds = padBounds(rectangleBetween(start, end), 2 * unit);
+  } else if (guide) {
+    context.beginPath();
+    context.arc(guide.x, guide.y, 6 * unit, 0, Math.PI * 2);
+    context.stroke();
+    bounds = padBounds(rectangleBetween(guide, guide), 8 * unit);
+  } else {
+    context.stroke(worldShapePath(shape));
+    bounds = padBounds(worldBounds(shape), 2 * unit);
+  }
+  context.restore();
+  return bounds;
 }
 
 function segmentEndpoints(object) {
@@ -987,13 +1034,18 @@ function shapeForConnection(id) {
   return id ? objects.find(object => object.shapeId === id) : null;
 }
 
-function polylineExtension(line, point, snap, startShape, endShape) {
+function polylineExtension(line, point, snap, startShape, target) {
   const firstSegment = line.points.length === 1;
-  const anchor = objectToWorld(line, line.points.at(-1));
+  const endShape = target?.shape;
+  const startAnchor = firstSegment && startShape && line.startConnectionAnchor &&
+    connectionAnchorGeometry(shapeConnectionGeometry(startShape), line.startConnectionAnchor);
+  const anchor = startAnchor && !Array.isArray(startAnchor)
+    ? startAnchor : objectToWorld(line, line.points.at(-1));
   const constrained = snap || (firstSegment && startShape && line.constrainStart);
   const direction = constrained ? connectionDirection(anchor, point) : undefined;
   const connection = {
     endShapeId: endShape?.shapeId,
+    endConnectionAnchor: target?.anchor,
     endConnectionDirection: endShape && snap ? direction : undefined,
   };
   if (firstSegment) {
@@ -1005,13 +1057,13 @@ function polylineExtension(line, point, snap, startShape, endShape) {
   return { vertex: worldToObject(line, vertex), connection };
 }
 
-function drawPolylineDraft(hover, endShape) {
+function drawPolylineDraft(hover, target) {
   const points = polylineDraft.points;
   const startShape = shapeForConnection(polylineDraft.startShapeId);
-  const extension = hover ? polylineExtension(polylineDraft, hover, polylineSnap, startShape, endShape) : null;
+  const extension = hover ? polylineExtension(polylineDraft, hover, lineSnap, startShape, target) : null;
   const preview = styledPolyline({ ...polylineDraft, ...extension?.connection },
     extension ? [...points, extension.vertex] : points);
-  updateLineConnections(preview, startShape, endShape);
+  updateLineConnections(preview, startShape, target?.shape);
   drawObject(context, preview);
   return [worldBounds(preview), ...drawLineHandles(preview, preview.points.slice(0, points.length))];
 }
@@ -1020,18 +1072,21 @@ function addPolylinePoint(point, snap) {
   if (!polylineDraft) {
     setSelection([]);
     polylineDraft = createObject("polyline", point, color);
-    if (!shiftHeld) polylineDraft.startShapeId = connectionTargetAt(point)?.shapeId;
+    const target = !shiftHeld && connectionTargetAt(point, undefined, snap);
+    polylineDraft.startShapeId = target?.shape?.shapeId;
+    polylineDraft.startConnectionAnchor = target?.anchor;
+    if (target?.guide && !Array.isArray(target.guide)) Object.assign(polylineDraft, target.guide);
     polylineDraft.constrainStart = snap;
     polylineDraft.points = [{ x: 0, y: 0 }];
     return;
   }
   const { points, startShapeId } = polylineDraft;
-  const endShape = shiftHeld ? null : connectionTargetAt(point, points.length === 1 ? startShapeId : undefined);
-  const { vertex, connection } = polylineExtension(polylineDraft, point, snap, shapeForConnection(startShapeId), endShape);
+  const target = shiftHeld ? null : connectionTargetAt(point, points.length === 1 ? startShapeId : undefined, snap);
+  const { vertex, connection } = polylineExtension(polylineDraft, point, snap, shapeForConnection(startShapeId), target);
   if (distanceBetween(points.at(-1), vertex) * view.zoom < 2) return;
   points.push(vertex);
   Object.assign(polylineDraft, connection);
-  if (endShape) finishPolyline();
+  if (target) finishPolyline();
 }
 
 function finishPolyline() {
@@ -1139,20 +1194,41 @@ function worldShapePath(shape) {
   return path;
 }
 
-function connectionTargetAt(point, excludedId) {
+function connectionTargetAt(point, excludedId, constrained) {
   const radius = (touchLayout.matches ? 14 : 8) / view.zoom;
   context.save();
   context.resetTransform();
   context.lineWidth = radius * 2;
   context.lineJoin = "round";
-  const target = objects.findLast(object => {
+  const shape = objects.findLast(object => {
     if (!object.shapeId || object.shapeId === excludedId || !object.end.x || !object.end.y ||
         !containsPoint(padBounds(worldBounds(object), radius), point)) return false;
     const outline = worldShapePath(object);
     return context.isPointInPath(outline, point.x, point.y) || context.isPointInStroke(outline, point.x, point.y);
   });
   context.restore();
-  return target;
+  if (!shape) return null;
+  if (constrained) return { shape };
+
+  const geometry = shapeConnectionGeometry(shape);
+  let nearest = (touchLayout.matches ? 11 : 6) / view.zoom;
+  let anchor;
+  let guide;
+  function consider(kind, index, candidate, distance) {
+    if (distance >= nearest) return;
+    nearest = distance;
+    anchor = `${kind}:${index}`;
+    guide = candidate;
+  }
+  for (const { point: marker, index } of shapeConnectionMarkers(geometry, 12 / view.zoom)) {
+    consider("midpoint", index, marker, distanceBetween(point, marker));
+  }
+  geometry.corner.forEach((corner, index) => consider("corner", index, corner, distanceBetween(point, corner)));
+  if (!anchor) {
+    nearest = (touchLayout.matches ? 9 : 5) / view.zoom;
+    geometry.side.forEach((side, index) => consider("side", index, side, distanceBetween(point, projectOntoSide(side, point))));
+  }
+  return { shape, anchor, guide };
 }
 
 function updateShapeDraft(point, constrained) {
@@ -1161,11 +1237,15 @@ function updateShapeDraft(point, constrained) {
     return;
   }
   const { start } = gesture;
-  const startShape = shiftHeld ? null : gesture.startShape;
-  const endShape = shiftHeld ? null : connectionTargetAt(point, startShape?.shapeId);
-  gesture.connectionTarget = endShape || startShape;
+  const startTarget = shiftHeld ? null : connectionTargetAt(start, undefined, constrained);
+  const startShape = startTarget?.shape;
+  const endTarget = shiftHeld ? null : connectionTargetAt(point, startShape?.shapeId, constrained);
+  const endShape = endTarget?.shape;
+  gesture.connectionTarget = endTarget || startTarget;
   draft.startShapeId = startShape?.shapeId;
   draft.endShapeId = endShape?.shapeId;
+  draft.startConnectionAnchor = startTarget?.anchor;
+  draft.endConnectionAnchor = endTarget?.anchor;
   const direction = constrained ? connectionDirection(start, point) : undefined;
   draft.startConnectionDirection = startShape ? direction : undefined;
   draft.endConnectionDirection = endShape ? direction : undefined;
@@ -1259,12 +1339,16 @@ function restoreEndpointBindings({ object, original }) {
   object.endShapeId = original.endShapeId;
   object.startConnectionDirection = original.startConnectionDirection;
   object.endConnectionDirection = original.endConnectionDirection;
+  object.startConnectionAnchor = original.startConnectionAnchor;
+  object.endConnectionAnchor = original.endConnectionAnchor;
   object.connectionOffset = original.connectionOffset;
 }
 
-function changeEndpointBinding(object, original, movingStart, shape, direction, sharedSegment, anchor) {
+function changeEndpointBinding(object, original, movingStart, target, direction, sharedSegment, anchor) {
   restoreEndpointBindings({ object, original });
+  const shape = target?.shape;
   object[movingStart ? "startShapeId" : "endShapeId"] = shape?.shapeId;
+  object[movingStart ? "startConnectionAnchor" : "endConnectionAnchor"] = target?.anchor;
   const key = movingStart ? "startConnectionDirection" : "endConnectionDirection";
   object[key] = direction;
   if (!sharedSegment || !object.startShapeId || !object.endShapeId) {
@@ -1291,17 +1375,18 @@ function movePolylineVertex(point, constrained) {
   const lastIndex = original.points.length - 1;
   const oppositeId = index === 0 ? original.endShapeId : original.startShapeId;
   const endpoint = index === 0 || index === lastIndex;
-  const shape = endpoint && !shiftHeld ? connectionTargetAt(target, lastIndex === 1 ? oppositeId : undefined) : null;
-  const anchorShape = index === 1 ? shapeForConnection(original.startShapeId)
-    : index === 0 && lastIndex === 1 ? shapeForConnection(original.endShapeId) : null;
+  const binding = endpoint && !shiftHeld
+    ? connectionTargetAt(target, lastIndex === 1 ? oppositeId : undefined, constrained) : null;
+  const anchorShape = index === 1 && !original.startConnectionAnchor ? shapeForConnection(original.startShapeId)
+    : index === 0 && lastIndex === 1 && !original.endConnectionAnchor ? shapeForConnection(original.endShapeId) : null;
   const snapAnchor = anchorShape ? shapeCenter(anchorShape) : anchor;
   // Match straight lines by snapping in canvas coordinates, even after object transforms.
-  const vertex = constrained && !shape ? snapSegmentEnd(snapAnchor, target) : target;
-  if (!shape && constrained && distanceBetween(snapAnchor, vertex) < 1e-6) return;
-  gesture.connectionTarget = shape;
+  const vertex = constrained && !binding ? snapSegmentEnd(snapAnchor, target) : target;
+  if (!binding && constrained && distanceBetween(snapAnchor, vertex) < 1e-6) return;
+  gesture.connectionTarget = binding;
   if (endpoint) {
-    const direction = shape && constrained ? connectionDirection(anchor, target) : undefined;
-    changeEndpointBinding(object, original, index === 0, shape, direction, lastIndex === 1, anchor);
+    const direction = binding && constrained ? connectionDirection(anchor, target) : undefined;
+    changeEndpointBinding(object, original, index === 0, binding, direction, lastIndex === 1, anchor);
   }
   const points = original.points.slice();
   points[index] = worldToObject(original, vertex);
@@ -1343,16 +1428,17 @@ function moveEndpoint(point, constrained) {
   }
   const target = { x: handle.x + (point.x - start.x), y: handle.y + (point.y - start.y) };
   const oppositeId = movingStart ? original.endShapeId : original.startShapeId;
-  const shape = shiftHeld ? null : connectionTargetAt(target, oppositeId);
-  const anchorShape = shapeForConnection(oppositeId);
+  const binding = shiftHeld ? null : connectionTargetAt(target, oppositeId, constrained);
+  const oppositeAnchor = movingStart ? original.endConnectionAnchor : original.startConnectionAnchor;
+  const anchorShape = oppositeAnchor ? null : shapeForConnection(oppositeId);
   const snapAnchor = anchorShape ? shapeCenter(anchorShape) : anchor;
   // Snap in canvas coordinates so existing rotation and scaling do not affect the angle.
-  const endpoint = constrained && !shape ? snapSegmentEnd(snapAnchor, target) : target;
+  const endpoint = constrained && !binding ? snapSegmentEnd(snapAnchor, target) : target;
   // Keep the endpoints distinct so the segment and both handles stay reachable.
-  if (!shape && distanceBetween(endpoint, snapAnchor) < 1e-6) return;
-  gesture.connectionTarget = shape;
-  const direction = shape && constrained ? connectionDirection(anchor, target) : undefined;
-  changeEndpointBinding(object, original, movingStart, shape, direction, true, anchor);
+  if (!binding && distanceBetween(endpoint, snapAnchor) < 1e-6) return;
+  gesture.connectionTarget = binding;
+  const direction = binding && constrained ? connectionDirection(anchor, target) : undefined;
+  changeEndpointBinding(object, original, movingStart, binding, direction, true, anchor);
   // Start each event from the fixed endpoint captured when the drag began.
   Object.assign(object, movingStart ? endpoint : { x: original.x, y: original.y });
   setShapeEnd(object, worldToObject(object, movingStart ? anchor : endpoint));
@@ -1646,10 +1732,11 @@ function startPointer(event) {
   const pan = spaceHeld || event.button !== 0 || activeTool === "pan";
   const canEdit = !pan && activeTool !== "laser" && !polylineDraft;
   const additive = primaryModifier(event);
-  const startShape = canEdit && ["line", "polyline"].includes(activeTool) ? connectionTargetAt(point) : null;
+  const startTarget = canEdit && !shiftHeld && ["line", "polyline"].includes(activeTool)
+    ? connectionTargetAt(point, undefined, additive) : null;
   const edit = canEdit && (startEndpointDrag(point, additive) || startPolylineVertex(point, additive) ||
-    (!startShape && (startShapeAdjustment(point, additive) || startRotation(point))));
-  const resize = canEdit && !startShape && !["select", "text"].includes(activeTool) ? startResize(point, true) : null;
+    (!startTarget && (startShapeAdjustment(point, additive) || startRotation(point))));
+  const resize = canEdit && !startTarget && !["select", "text"].includes(activeTool) ? startResize(point, true) : null;
   if (pan) {
     gesture = { kind: "pan", id: event.pointerId, start: screen, x: view.x, y: view.y };
   } else if (edit) {
@@ -1680,10 +1767,7 @@ function startPointer(event) {
       updateShape(draft, point);
     }
     gesture = { kind: freehand ? "stroke" : "shape", start: point, id: event.pointerId };
-    if (isSegment(draft)) {
-      gesture.startShape = startShape;
-      if (!shiftHeld) gesture.connectionTarget = startShape;
-    }
+    if (isSegment(draft)) gesture.connectionTarget = startTarget;
   }
 
   updateControls();
@@ -1811,8 +1895,8 @@ function finishPointer(event, cancelled) {
       if (clickedObject) {
         toggleSelection(clickedObject);
       } else if (kind === "polylinePoint" && !dragged(6)) {
-        polylineSnap = primaryModifier(event);
-        addPolylinePoint(worldPoint(screenPoint(event)), polylineSnap);
+        lineSnap = primaryModifier(event);
+        addPolylinePoint(worldPoint(screenPoint(event)), lineSnap);
       } else if (kind === "stroke" || (kind === "shape" && dragged(2))) {
         objects.push(draft);
         setSelection([draft], { fromDrawing: true });
@@ -2009,8 +2093,8 @@ function cloneObjects(items, offset) {
     if (hasLineConnections(object)) {
       copy.startShapeId = shapeCopies.get(object.startShapeId);
       copy.endShapeId = shapeCopies.get(object.endShapeId);
-      if (!copy.startShapeId) copy.startConnectionDirection = undefined;
-      if (!copy.endShapeId) copy.endConnectionDirection = undefined;
+      if (!copy.startShapeId) copy.startConnectionDirection = copy.startConnectionAnchor = undefined;
+      if (!copy.endShapeId) copy.endConnectionDirection = copy.endConnectionAnchor = undefined;
       if (!copy.startShapeId || !copy.endShapeId) copy.connectionOffset = undefined;
     }
     if (object.groupId) {
@@ -2678,7 +2762,7 @@ canvas.addEventListener("pointermove", event => {
   if (event.pointerType !== "touch") {
     canvasPointer = { clientX: event.clientX, clientY: event.clientY };
   }
-  if (polylineDraft) polylineSnap = primaryModifier(event);
+  lineSnap = primaryModifier(event);
   if (activeTool === "line" || activeTool === "polyline") requestDraw();
   movePointer(event);
 });
@@ -2771,8 +2855,8 @@ function updateConstrainedGesture(event) {
     shiftHeld = event.shiftKey;
     requestDraw();
   } else if (event.key !== modifierKey) return;
-  if (polylineDraft) {
-    polylineSnap = primaryModifier(event);
+  if (["line", "polyline"].includes(activeTool)) {
+    lineSnap = primaryModifier(event);
     requestDraw();
   }
   if (!gesture) return;
