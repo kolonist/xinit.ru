@@ -120,21 +120,30 @@
         <div class="control-group" id="actions" role="group" data-i18n-label="actions" aria-label="Действия"></div>
         <div class="control-group export-options" id="export-options" role="group"
           data-i18n-label="exportPng" aria-label="Копировать или скачать PNG" hidden>
-          <button class="action-button" type="button" data-export="copy">
-            <span class="export-command"><span data-i18n="copy">Копировать PNG</span></span>
-            <span data-i18n="exportVisible">Видимую область</span>
+          <span class="export-heading" id="export-copy-heading" data-i18n="copy">Копировать</span>
+          <button class="action-button" type="button" data-export="copy" aria-labelledby="export-copy-heading export-copy-visible">
+            <span id="export-copy-visible" data-i18n="exportVisible">Видимое</span>
           </button>
-          <button class="action-button" type="button" data-export="copy" data-full>
-            <span class="export-command"><span data-i18n="copy">Копировать PNG</span></span>
-            <span data-i18n="exportAll">Весь рисунок</span>
+          <button class="action-button" type="button" data-export="copy" data-area="region"
+            aria-labelledby="export-copy-heading export-copy-region">
+            <span id="export-copy-region" data-i18n="exportRegion">Выделить</span>
           </button>
-          <button class="action-button" type="button" data-export="download">
-            <span class="export-command"><span data-i18n="download">Скачать PNG</span></span>
-            <span data-i18n="exportVisible">Видимую область</span>
+          <button class="action-button" type="button" data-export="copy" data-area="all"
+            aria-labelledby="export-copy-heading export-copy-all">
+            <span id="export-copy-all" data-i18n="exportAll">Всё</span>
           </button>
-          <button class="action-button" type="button" data-export="download" data-full>
-            <span class="export-command"><span data-i18n="download">Скачать PNG</span></span>
-            <span data-i18n="exportAll">Весь рисунок</span>
+          <span class="export-heading" id="export-download-heading" data-i18n="download">Скачать</span>
+          <button class="action-button" type="button" data-export="download"
+            aria-labelledby="export-download-heading export-download-visible">
+            <span id="export-download-visible" data-i18n="exportVisible">Видимое</span>
+          </button>
+          <button class="action-button" type="button" data-export="download" data-area="region"
+            aria-labelledby="export-download-heading export-download-region">
+            <span id="export-download-region" data-i18n="exportRegion">Выделить</span>
+          </button>
+          <button class="action-button" type="button" data-export="download" data-area="all"
+            aria-labelledby="export-download-heading export-download-all">
+            <span id="export-download-all" data-i18n="exportAll">Всё</span>
           </button>
         </div>
         <div class="control-group" id="selection-actions" role="group"

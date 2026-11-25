@@ -142,6 +142,7 @@
 .control-group[hidden], .tool-button[hidden], .canvas-hint[hidden] { display: none; }
 
 #actions .tool-button[aria-expanded="true"],
+#actions .tool-button[data-active],
 #actions .tool-button[aria-disabled="true"] {
   border-color: var(--accent);
   background: #14466a;
@@ -156,33 +157,31 @@
 
 .export-options {
   display: grid;
+  grid-auto-flow: column;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: stretch;
-  width: min(100%, 21rem);
+  grid-template-rows: repeat(4, auto);
+  column-gap: 0.35rem;
+  width: min(100%, 14rem);
+}
+
+.export-heading {
+  padding: 0.2rem 0.45rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
 }
 
 .export-options .action-button {
   min-height: 2.35rem;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.35rem 0.55rem;
+  justify-content: flex-start;
+  gap: 0.35rem;
+  padding: 0.3rem 0.45rem;
   font-size: 0.8rem;
   line-height: 1.25;
-  text-align: center;
 }
 
-.export-options .action-button > span:last-child { font-weight: 400; }
-
-.export-command {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  max-width: 100%;
-  gap: 0.12rem 0.3rem;
-}
-
-.export-command svg {
+.export-options .action-button svg {
   flex: none;
   width: 1rem;
   height: 1rem;
@@ -612,6 +611,6 @@
   }
   .zoom-controls { right: 0.4rem; bottom: 0.4rem; }
   .paint-feedback { inset: auto 0.4rem 3.2rem; }
-  .paint-hints:not([data-connection-hint]), #mouse-pan-hint { display: none; }
+  .paint-hints:not([data-connection-hint], [data-export-region]), #mouse-pan-hint { display: none; }
   .paint-hints { max-width: 100%; white-space: normal; }
 }

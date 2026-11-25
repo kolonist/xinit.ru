@@ -1,7 +1,7 @@
 "use strict";
 
 function renderPng(width, height, render) {
-  const scale = Math.min(1, 4096 / Math.max(width, height));
+  const scale = Math.min(2, 8192 / Math.max(width, height));
   const output = document.createElement("canvas");
   output.width = Math.ceil(width * scale);
   output.height = Math.ceil(height * scale);

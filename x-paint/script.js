@@ -21,7 +21,7 @@ const textContent = document.querySelector("#text-content");
 const textActions = document.querySelector("#text-actions");
 const exportOptions = document.querySelector("#export-options");
 const exportButtons = [...exportOptions.querySelectorAll("button")];
-const fullExportButtons = exportButtons.filter(button => button.hasAttribute("data-full"));
+const fullExportButtons = exportButtons.filter(button => button.dataset.area === "all");
 const alignmentOptions = document.querySelector("#alignment-options");
 const palettePopup = document.querySelector("#palette-popup");
 const shapeLibrary = document.querySelector("#shape-library");
@@ -105,6 +105,7 @@ let boardPreviews;
 let preparingShare = false;
 let sceneGeneration = 0;
 let crop = null;
+let regionExportAction = null;
 let gesture = null;
 let draft = null;
 let polylineDraft = null;
@@ -309,9 +310,10 @@ document.querySelector("#share-limit-save").addEventListener("click", () => {
   shareLimitDialog.close();
   saveProjectFile();
 });
+const exportAreaIcons = { visible: "exportVisible", region: "exportRegion", all: "exportAll" };
 for (const button of exportButtons) {
-  button.querySelector(".export-command").insertAdjacentHTML("afterbegin", paintIconMarkup(button.dataset.export));
-  button.addEventListener("click", () => exportImage(button.dataset.export, button.hasAttribute("data-full")));
+  button.insertAdjacentHTML("afterbegin", paintIconMarkup(exportAreaIcons[button.dataset.area ?? "visible"]));
+  button.addEventListener("click", () => exportImage(button.dataset.export, button.dataset.area));
 }
 
 const editButton = addButton(selectionActions, "edit", () => editCanvasText(selectedTextTarget()));
@@ -344,6 +346,7 @@ function setTool(tool) {
   finishTextEdit(true);
   cancelGesture();
   crop = null;
+  regionExportAction = null;
   if (tool !== "select") {
     selection.clear();
     selectionFromDrawing = false;
@@ -584,8 +587,9 @@ function updateColors() {
 }
 
 function updateControls() {
-  canvas.dataset.tool = spaceHeld ? "pan" : activeTool;
+  canvas.dataset.tool = spaceHeld ? "pan" : regionExportAction ? "exportRegion" : activeTool;
   canvas.toggleAttribute("data-panning", gesture?.kind === "pan" || gesture?.kind === "pinch");
+  exportButton.toggleAttribute("data-active", Boolean(regionExportAction));
   mousePanHint.hidden = touchLayout.matches;
   canvas.setAttribute("aria-describedby", touchLayout.matches ? "tool-hint" : "tool-hint mouse-pan-hint");
   toolButtons.forEach((button, tool) => button.setAttribute("aria-pressed", String(activeTool === tool)));
@@ -639,7 +643,7 @@ function updateControls() {
   clearButton.disabled = empty && !drawingId;
   undoButton.disabled = !polylineDraft && undoHistory.length === 0;
   const object = singleSelection();
-  selectionActions.hidden = !selection.size || Boolean(crop || textEdit);
+  selectionActions.hidden = !selection.size || Boolean(crop || textEdit || regionExportAction);
   const arrangementCount = crop || textEdit ? 0 : arrangementUnits().length;
   alignmentButton.disabled = arrangementCount < 2;
   for (const { button, minimum } of alignmentCommands) button.disabled = arrangementCount < minimum;
@@ -657,7 +661,8 @@ function updateControls() {
   ungroupButton.hidden = ![...selection].some(item => item.groupId);
   backButton.disabled = lowerButton.disabled = !canMoveLayers(-1);
   frontButton.disabled = raiseButton.disabled = !canMoveLayers(1);
-  emptyHint.hidden = objects.length > 0 || Boolean(draft || polylineDraft || textEdit) || laserPoints.length > 0;
+  emptyHint.hidden = objects.length > 0 || Boolean(draft || polylineDraft || textEdit || regionExportAction) ||
+    laserPoints.length > 0;
   updateZoomControls();
   const hints = {
     select: touchLayout.matches ? "marqueeHint" : "clickSelectionHint",
@@ -678,10 +683,12 @@ function updateControls() {
   if (object?.type === "parallelogram") hint = "parallelogramAdjustmentHint";
   if (crop) hint = "cropHint";
   if (textEdit) hint = "textEditHint";
+  if (regionExportAction) hint = touchLayout.matches ? "exportRegionTouchHint" : "exportRegionHint";
   const showsConnectionHint = ["segmentHint", "segmentTouchHint", "endpointsSnapHint", "endpointsHint",
     "polylineHint", "polylineTouchHint", "polylineEditHint"].includes(hint);
   toolHint.textContent = showsConnectionHint ? `${label("connectionAreasHint")} · ${label(hint)}` : label(hint);
   hintRow.toggleAttribute("data-connection-hint", showsConnectionHint);
+  hintRow.toggleAttribute("data-export-region", Boolean(regionExportAction));
 }
 
 function updateZoomControls() {
@@ -822,9 +829,10 @@ function draw(now) {
   }
 
   const showDraft = draft && draft.type !== "marker";
-  const showSelection = selection.size > 0 && !textEdit && !draft && !polylineDraft;
-  const showMarquee = gesture?.kind === "marquee";
-  const connectionHover = !gesture && !spaceHeld && canvasPointer && ["line", "polyline"].includes(activeTool)
+  const showSelection = selection.size > 0 && !textEdit && !draft && !polylineDraft && !regionExportAction;
+  const showMarquee = gesture?.kind === "marquee" || gesture?.kind === "exportRegion";
+  const connectionHover = !gesture && !spaceHeld && !regionExportAction && canvasPointer &&
+    ["line", "polyline"].includes(activeTool)
     ? worldPoint(screenPoint(canvasPointer)) : null;
   const connectionTarget = !shiftHeld && (gesture ? gesture.connectionTarget : connectionHover &&
     connectionTargetAt(connectionHover, polylineDraft?.points.length === 1 ? polylineDraft.startShapeId : undefined, lineSnap));
@@ -1172,6 +1180,7 @@ function viewCenter() {
 }
 
 function zoomAt(anchor, nextZoom, point = worldPoint(anchor)) {
+  if (gesture?.kind === "exportRegion") return;
   view.zoom = Math.max(0.1, Math.min(8, nextZoom));
   view.x = anchor.x - point.x * view.zoom;
   view.y = anchor.y - point.y * view.zoom;
@@ -1729,8 +1738,8 @@ function startPointer(event) {
     return;
   }
 
-  const pan = spaceHeld || event.button !== 0 || activeTool === "pan";
-  const canEdit = !pan && activeTool !== "laser" && !polylineDraft;
+  const pan = spaceHeld || event.button !== 0 || (!regionExportAction && activeTool === "pan");
+  const canEdit = !pan && !regionExportAction && activeTool !== "laser" && !polylineDraft;
   const additive = primaryModifier(event);
   const startTarget = canEdit && !shiftHeld && ["line", "polyline"].includes(activeTool)
     ? connectionTargetAt(point, undefined, additive) : null;
@@ -1739,6 +1748,8 @@ function startPointer(event) {
   const resize = canEdit && !startTarget && !["select", "text"].includes(activeTool) ? startResize(point, true) : null;
   if (pan) {
     gesture = { kind: "pan", id: event.pointerId, start: screen, x: view.x, y: view.y };
+  } else if (regionExportAction) {
+    gesture = { kind: "exportRegion", id: event.pointerId, start: point, bounds: rectangleBetween(point, point) };
   } else if (edit) {
     gesture = { ...edit, id: event.pointerId };
   } else if (activeTool === "select") {
@@ -1835,6 +1846,14 @@ function movePointer(event) {
     case "marquee":
       gesture.bounds = rectangleBetween(gesture.start, point);
       break;
+    case "exportRegion": {
+      const edge = worldPoint({
+        x: Math.max(0, Math.min(canvas.clientWidth, screen.x)),
+        y: Math.max(0, Math.min(canvas.clientHeight, screen.y)),
+      });
+      gesture.bounds = rectangleBetween(gesture.start, edge);
+      break;
+    }
     case "stroke":
       extendStroke(draft, point);
       break;
@@ -1920,6 +1939,7 @@ function finishPointer(event, cancelled) {
             containsPoint(bounds, { x: area.right, y: area.bottom });
         }));
       }
+      if (kind === "exportRegion") exportSelectedRegion(bounds);
       if (["move", "resize", "rotate", "endpoint", "polylineVertex", "adjustShape"].includes(kind)) commitSceneEdit();
       if (kind === "pan") persistScene(false);
     }
@@ -2137,9 +2157,9 @@ async function pasteLocal() {
   return true;
 }
 
-async function copyImage(full) {
+async function copyImage(area, region) {
   announce("copying");
-  const png = capturePng(full);
+  const png = capturePng(area, region);
   const localCopy = png.catch(() => null);
   localClipboardObjects = null;
   localClipboardImage = localCopy;
@@ -2675,6 +2695,7 @@ function resetPaintInteraction() {
   closePalette();
   closeSettingsPopup();
   crop = null;
+  regionExportAction = null;
   laserPoints.length = 0;
   selection.clear();
   selectionFromDrawing = false;
@@ -2713,35 +2734,78 @@ function setExportOptions(open) {
 }
 
 function toggleExportOptions() {
+  cancelRegionExport();
   if (exportOptions.hidden) closeSettingsPopup();
   setExportOptions(exportOptions.hidden);
   if (!exportOptions.hidden) exportButtons[0].focus({ preventScroll: true });
 }
 
-function exportImage(action, full) {
+function exportImage(action, area) {
   finishTextEdit(true);
-  if (full && !objects.length && (polylineDraft?.points.length ?? 0) < 2) return;
+  if (area === "all" && !objects.length && (polylineDraft?.points.length ?? 0) < 2) return;
   setExportOptions(false);
+  if (area === "region") {
+    cancelGesture();
+    crop = null;
+    regionExportAction = action;
+    updateControls();
+    canvas.focus({ preventScroll: true });
+    requestDraw();
+    return;
+  }
   exportButton.focus({ preventScroll: true });
-  if (action === "copy") copyImage(full);
-  else downloadImage(full);
+  if (action === "copy") copyImage(area);
+  else downloadImage(area);
 }
 
-async function capturePng(full) {
+function cancelRegionExport() {
+  if (!regionExportAction) return false;
+  regionExportAction = null;
+  if (gesture?.kind === "exportRegion") cancelGesture();
+  updateControls();
+  requestDraw();
+  return true;
+}
+
+function exportSelectedRegion(bounds) {
+  const region = {
+    left: Math.round(bounds.left * view.zoom + view.x),
+    top: Math.round(bounds.top * view.zoom + view.y),
+    right: Math.round(bounds.right * view.zoom + view.x),
+    bottom: Math.round(bounds.bottom * view.zoom + view.y),
+  };
+  if (region.right <= region.left || region.bottom <= region.top) return;
+  const action = regionExportAction;
+  regionExportAction = null;
+  if (action === "copy") copyImage("region", region);
+  else downloadImage("region", region);
+}
+
+async function capturePng(area, region) {
   const line = polylineDraftSnapshot();
   const artwork = line ? [...objects, line] : objects;
-  const area = full ? wholeArea(artwork, 24) : {
-    ...view,
-    width: canvas.clientWidth,
-    height: canvas.clientHeight,
+  if (area === "all") return framedImage(artwork, wholeArea(artwork, 24), stage);
+  const { left, top, right, bottom } = region ?? {
+    left: 0,
+    top: 0,
+    right: canvas.clientWidth,
+    bottom: canvas.clientHeight,
   };
-  return framedImage(artwork, area, stage);
+  const zoom = Math.max(1, view.zoom);
+  const scale = zoom / view.zoom;
+  return framedImage(artwork, {
+    x: (view.x - left) * scale,
+    y: (view.y - top) * scale,
+    zoom,
+    width: (right - left) * scale,
+    height: (bottom - top) * scale,
+  }, stage);
 }
 
-async function downloadImage(full) {
+async function downloadImage(area, region) {
   try {
     const fileName = paintFileName("png");
-    downloadPaintBlob(await capturePng(full), fileName);
+    downloadPaintBlob(await capturePng(area, region), fileName);
   } catch {
     announce("exportError");
   }
@@ -2792,12 +2856,17 @@ canvas.addEventListener("wheel", event => {
 }, { passive: false });
 
 canvas.addEventListener("dblclick", event => {
-  if ((activeTool !== "select" && !isFillableShape(activeTool)) || crop || spaceHeld || primaryModifier(event)) return;
+  if ((activeTool !== "select" && !isFillableShape(activeTool)) ||
+    regionExportAction || crop || spaceHeld || primaryModifier(event)) return;
   editCanvasText(objectAt(worldPoint(screenPoint(event)), true));
 });
 
 canvas.addEventListener("keydown", event => {
   const { key } = event;
+  if (regionExportAction && key !== " " && key !== "+" && key !== "-" && key !== "=") {
+    if (key === "Escape" && cancelRegionExport()) event.preventDefault();
+    return;
+  }
   if (key === "Escape") {
     cancelGesture();
     if (!finishPolyline()) {
@@ -2891,6 +2960,10 @@ document.addEventListener("keydown", event => {
     exportButton.focus({ preventScroll: true });
     return;
   }
+  if (event.key === "Escape" && cancelRegionExport()) {
+    event.preventDefault();
+    return;
+  }
   if (event.key === "Escape" && finishPolyline()) {
     event.preventDefault();
     canvas.focus({ preventScroll: true });
@@ -2922,7 +2995,7 @@ document.addEventListener("keydown", event => {
     undoEdit();
     return;
   }
-  if (!selection.size || textEdit || crop || gesture ||
+  if (!selection.size || textEdit || crop || gesture || regionExportAction ||
     event.code !== "KeyD" || !primaryModifier(event)) return;
   event.preventDefault();
   if (event.repeat) return;
@@ -2981,7 +3054,7 @@ document.addEventListener("copy", event => {
     !event.clipboardData || window.getSelection()?.isCollapsed === false) return;
   if (!selection.size) {
     event.preventDefault();
-    copyImage(false);
+    copyImage();
     return;
   }
   const token = crypto.randomUUID();
