@@ -23,11 +23,17 @@ const exportOptions = document.querySelector("#export-options");
 const exportButtons = [...exportOptions.querySelectorAll("button")];
 const fullExportButtons = exportButtons.filter(button => button.hasAttribute("data-full"));
 const palettePopup = document.querySelector("#palette-popup");
+const shapeLibrary = document.querySelector("#shape-library");
 const strokePopup = document.querySelector("#stroke-popup");
 const lineStylePopup = document.querySelector("#line-style-popup");
 const lineStyleInputs = [...lineStylePopup.querySelectorAll("input")];
 const mixedLineStyles = lineStylePopup.querySelector(".line-style-mixed");
 const lineStyleLabels = { solid: "lineStyleSolid", dashed: "lineStyleDashCaption", dotted: "lineStyleDotted" };
+const lineEndsPopup = document.querySelector("#line-ends-popup");
+const lineEndControls = [
+  [document.querySelector("#line-start"), lineStartArrow, "lineStart"],
+  [document.querySelector("#line-end"), lineEndArrow, "lineEnd"],
+];
 const strokeSliders = [...strokePopup.querySelectorAll("input")].map(input => ({
   kind: input.id === "marker-weight" ? "marker" : "stroke",
   input,
@@ -63,11 +69,12 @@ const toolButtons = new Map();
 const swatches = new Map();
 const objects = [];
 const selection = new Set();
+let selectionFromDrawing = false;
 const undoHistory = [];
 const undoLimit = 42;
 const editableProperties = ["x", "y", "scaleX", "scaleY", "angle", "shear", "color", "fill",
-  "fillTransparency", "groupId", "text", "source", "weight", "end", "lineStyle"];
-const propertyDefaults = { angle: 0, shear: 0, fill: null, fillTransparency: 0 };
+  "fillTransparency", "groupId", "text", "source", "weight", "end", "lineStyle", "shapeAdjustments", "lineEnds", "points"];
+const propertyDefaults = { angle: 0, shear: 0, fill: null, fillTransparency: 0, lineEnds: 0 };
 let committedObjects = [];
 const view = { x: 0, y: 0, zoom: 1 };
 const pointers = new Map();
@@ -81,6 +88,7 @@ let { color, backgroundColor, fillEnabled, fillTransparency } = defaultColors;
 const defaultStrokeWeights = { stroke: defaultStrokeWeight, marker: defaultMarkerWeight };
 const strokeWeights = { ...defaultStrokeWeights };
 let lineStyle = "solid";
+let defaultLineEnds = 0;
 let paletteTarget = null;
 let openSettings = null;
 let database;
@@ -96,6 +104,8 @@ let sceneGeneration = 0;
 let crop = null;
 let gesture = null;
 let draft = null;
+let polylineDraft = null;
+let polylineSnap = false;
 let spaceHeld = false;
 let textEdit = null;
 let statusKey = "";
@@ -140,12 +150,26 @@ function addButton(group, key, onClick, icon = key) {
 const drawingTools = document.querySelector("#drawing-tools");
 const toolShortcuts = new Map([
   ["KeyM", "select"], ["KeyH", "pan"], ["KeyB", "brush"], ["KeyS", "marker"],
-  ["KeyL", "line"], ["KeyA", "arrow"], ["KeyR", "rect"], ["KeyC", "circle"], ["KeyT", "text"],
+  ["KeyL", "line"], ["KeyA", "polyline"], ["KeyR", "rect"], ["KeyC", "circle"], ["KeyT", "text"],
 ]);
 for (const [code, tool] of toolShortcuts) {
   const button = addButton(drawingTools, tool, () => setTool(tool));
   button.setAttribute("aria-keyshortcuts", code.slice(3));
   toolButtons.set(tool, button);
+}
+const shapeLibraryButton = addButton(drawingTools, "shapeLibrary", () => toggleSettingsPopup({
+  popup: shapeLibrary,
+  button: shapeLibraryButton,
+  focusControl: () => shapeLibraryTypes.includes(activeTool) ? toolButtons.get(activeTool) : shapeLibrary.firstElementChild,
+}));
+shapeLibraryButton.setAttribute("aria-controls", shapeLibrary.id);
+shapeLibraryButton.setAttribute("aria-expanded", "false");
+for (const shape of shapeLibraryTypes) {
+  const button = addButton(shapeLibrary, shape, () => {
+    closeSettingsPopup(true);
+    setTool(shape);
+  });
+  toolButtons.set(shape, button);
 }
 
 const colorPair = document.querySelector("#color-pair");
@@ -156,8 +180,8 @@ for (const [square, name] of [[foregroundSquare, "foreground"], [backgroundSquar
   square.setAttribute("aria-controls", palettePopup.id);
 }
 const swapColors = addButton(colorPair, "swapColors", () => {
-  [color, backgroundColor] = [backgroundColor, color];
-  applyPaintColors(true, true);
+  const displayed = displayedPaintColors();
+  applyPaintColors({ color: displayed.backgroundColor, backgroundColor: displayed.color });
 });
 swapColors.classList.add("swap-colors");
 
@@ -165,12 +189,9 @@ const palette = document.querySelector("#palette");
 for (const [name, value] of colors) {
   const swatch = addButton(palette, name, () => {
     if (paletteTarget === "background") {
-      backgroundColor = value;
-      fillEnabled = true;
-      applyPaintColors(false, true);
+      applyPaintColors({ backgroundColor: value, fillEnabled: true });
     } else {
-      color = value;
-      applyPaintColors(true, false);
+      applyPaintColors({ color: value });
     }
     closePalette(true);
   });
@@ -179,47 +200,53 @@ for (const [name, value] of colors) {
 }
 
 noFill.addEventListener("click", () => {
-  fillEnabled = false;
-  applyPaintColors(false, true);
+  applyPaintColors({ fillEnabled: false });
   closePalette(true);
 });
 
 transparencyInput.addEventListener("input", () => {
-  fillTransparency = transparencyInput.valueAsNumber;
-  fillEnabled = true;
-  cancelGesture();
-  for (const object of selection) {
-    if (!isFillable(object)) continue;
-    object.fill ??= backgroundColor;
-    object.fillTransparency = fillTransparency;
-  }
-  updateControls();
-  requestSceneDraw();
+  applyPaintColors({ fillTransparency: transparencyInput.valueAsNumber, fillEnabled: true }, false);
 });
 transparencyInput.addEventListener("change", () => commitSceneEdit());
 
 const strokeTools = document.querySelector(".stroke-tools");
-addSettingsButton("strokeWidth", strokePopup, () => {
+const strokeWidthButton = addSettingsButton("strokeWidth", strokePopup, () => {
   const kind = strokeKind(singleSelection()?.type ?? activeTool);
-  return strokeSliders.find(slider => slider.kind === kind).input;
+  return strokeSliders.find(slider => slider.kind === kind && !slider.input.disabled)?.input ??
+    strokeSliders.find(slider => !slider.input.disabled).input;
 });
 const lineStyleButton = addSettingsButton("lineStyle", lineStylePopup, () =>
   lineStyleInputs.find(input => input.checked) || lineStyleInputs[0]);
 const lineStyleCaption = lineStyleButton.querySelector("span");
 lineStylePopup.addEventListener("change", event => {
-  lineStyle = event.target.value;
+  const style = event.target.value;
+  if (updatesDrawingDefaults()) lineStyle = style;
   cancelGesture();
   for (const object of selection) {
-    if (hasLineStyle(object)) object.lineStyle = lineStyle;
+    if (hasLineStyle(object)) object.lineStyle = style;
   }
   updateControls();
   requestDraw();
   commitSceneEdit();
 });
+const lineEndsButton = addSettingsButton("lineEnds", lineEndsPopup, () => lineEndControls[0][0]);
+for (const [control, flag] of lineEndControls) {
+  control.addEventListener("change", () => {
+    const value = control.checked ? flag : 0;
+    if (updatesDrawingDefaults()) defaultLineEnds = (defaultLineEnds & ~flag) | value;
+    cancelGesture();
+    for (const object of selection) {
+      if (hasLineEnds(object)) setLineEnds(object, ((object.lineEnds ?? 0) & ~flag) | value);
+    }
+    updateControls();
+    requestSceneDraw();
+    commitSceneEdit();
+  });
+}
 for (const { kind, input } of strokeSliders) {
   input.addEventListener("input", () => {
     const weight = input.valueAsNumber;
-    strokeWeights[kind] = weight;
+    if (updatesDrawingDefaults()) strokeWeights[kind] = weight;
     cancelGesture();
     for (const object of selection) {
       if (object.weight !== undefined && strokeKind(object.type) === kind && object.weight !== weight) {
@@ -292,10 +319,14 @@ const zoomButton = addButton(zoomTools, "resetZoom", () => zoomAt(viewCenter(), 
 const zoomInButton = addButton(zoomTools, "zoomIn", () => zoomAt(viewCenter(), view.zoom * 1.25));
 
 function setTool(tool) {
+  if (tool !== activeTool) finishPolyline();
   finishTextEdit(true);
   cancelGesture();
   crop = null;
-  if (tool !== "select") selection.clear();
+  if (tool !== "select") {
+    selection.clear();
+    selectionFromDrawing = false;
+  }
   activeTool = tool;
   updateControls();
   requestDraw();
@@ -311,10 +342,14 @@ function selectedSegment() {
 }
 
 function hasLineStyle(object) {
-  return Boolean(object && (object.type === "brush" || isSegment(object) || isFillable(object)));
+  return Boolean(object && (object.type === "brush" || hasLineEnds(object) || isFillableShape(object.type)));
 }
 
-function setSelection(items) {
+function updatesDrawingDefaults() {
+  return selection.size === 0 || selectionFromDrawing;
+}
+
+function setSelection(items, { fromDrawing = false } = {}) {
   selection.clear();
   const groups = new Set();
   for (const object of items) {
@@ -326,17 +361,7 @@ function setSelection(items) {
       if (groups.has(object.groupId)) selection.add(object);
     }
   }
-  const object = singleSelection();
-  if (object?.color) color = object.color;
-  if (object?.weight !== undefined) strokeWeights[strokeKind(object.type)] = object.weight;
-  if (hasLineStyle(object)) lineStyle = object.lineStyle;
-  if (object && isFillable(object)) {
-    fillEnabled = Boolean(object.fill);
-    if (object.fill) {
-      backgroundColor = object.fill;
-      fillTransparency = object.fillTransparency ?? 0;
-    }
-  }
+  selectionFromDrawing = fromDrawing && selection.size === 1;
   updateControls();
   requestDraw();
 }
@@ -388,15 +413,50 @@ function setShapeFill(object) {
   object.fillTransparency = fillTransparency;
 }
 
-function applyPaintColors(changeForeground, changeBackground) {
+function commonSelectionValue(matches, valueOf) {
+  const values = new Set([...selection].filter(matches).map(valueOf));
+  return values.size === 1 ? values.values().next().value : undefined;
+}
+
+function hasFill(object) {
+  return isFillableShape(object.type);
+}
+
+function hasForeground(object) {
+  return object.type !== "image";
+}
+
+function displayedPaintColors() {
+  const selectedFill = commonSelectionValue(hasFill, object => object.fill ?? null);
+  return {
+    color: commonSelectionValue(hasForeground, object => object.color) ?? color,
+    backgroundColor: selectedFill ?? backgroundColor,
+    fillEnabled: selectedFill === undefined ? fillEnabled : Boolean(selectedFill),
+    fillTransparency: commonSelectionValue(hasFill, object => object.fillTransparency) ?? fillTransparency,
+  };
+}
+
+function applyPaintColors(changes, commit = true) {
   cancelGesture();
+  if (updatesDrawingDefaults()) {
+    color = changes.color ?? color;
+    backgroundColor = changes.backgroundColor ?? backgroundColor;
+    fillEnabled = changes.fillEnabled ?? fillEnabled;
+    fillTransparency = changes.fillTransparency ?? fillTransparency;
+  }
   for (const object of selection) {
-    if (changeForeground && object.type !== "image") object.color = color;
-    if (changeBackground && isFillable(object)) setShapeFill(object);
+    if (hasForeground(object) && changes.color !== undefined) object.color = changes.color;
+    if (!hasFill(object)) continue;
+    if (changes.fillEnabled === false) object.fill = null;
+    else if (changes.fillEnabled || (changes.backgroundColor !== undefined && object.fill)) {
+      object.fill = changes.backgroundColor ?? object.fill ?? backgroundColor;
+      object.fillTransparency ??= fillTransparency;
+    }
+    if (changes.fillTransparency !== undefined) object.fillTransparency = changes.fillTransparency;
   }
   updateControls();
-  requestDraw();
-  commitSceneEdit();
+  requestSceneDraw();
+  if (commit) commitSceneEdit();
 }
 
 function paletteAnchor() {
@@ -426,7 +486,9 @@ function togglePalette(target) {
   palettePopup.hidden = false;
   updateColors();
   positionPopups();
-  const choice = target === "foreground" ? swatches.get(color) : fillEnabled ? swatches.get(backgroundColor) : noFill;
+  const displayed = displayedPaintColors();
+  const choice = target === "foreground" ? swatches.get(displayed.color) :
+    displayed.fillEnabled ? swatches.get(displayed.backgroundColor) : noFill;
   (choice || swatches.values().next().value).focus({ preventScroll: true });
 }
 
@@ -478,6 +540,7 @@ function closePalette(restoreFocus = false) {
 }
 
 function updateColors() {
+  const { color, backgroundColor, fillEnabled, fillTransparency } = displayedPaintColors();
   foregroundSquare.style.setProperty("--swatch", color);
   const alpha = Math.round(255 * (1 - fillTransparency / 100)).toString(16).padStart(2, "0");
   backgroundSquare.style.setProperty("--swatch", fillEnabled ? backgroundColor + alpha : backgroundColor);
@@ -500,15 +563,24 @@ function updateControls() {
   mousePanHint.hidden = touchLayout.matches;
   canvas.setAttribute("aria-describedby", touchLayout.matches ? "tool-hint" : "tool-hint mouse-pan-hint");
   toolButtons.forEach((button, tool) => button.setAttribute("aria-pressed", String(activeTool === tool)));
+  shapeLibraryButton.toggleAttribute("data-active", shapeLibraryTypes.includes(activeTool));
+  const editsDefaults = updatesDrawingDefaults();
+  const selected = [...selection];
+  foregroundSquare.disabled = swapColors.disabled = !editsDefaults && !selected.some(hasForeground);
+  backgroundSquare.disabled = !editsDefaults && !selected.some(hasFill);
   updateColors();
   for (const { kind, input, output, sample } of strokeSliders) {
-    const weight = strokeWeights[kind];
+    const supportsWeight = object => object.weight !== undefined && strokeKind(object.type) === kind;
+    const weight = commonSelectionValue(supportsWeight, object => object.weight) ?? strokeWeights[kind];
+    input.disabled = !editsDefaults && !selected.some(supportsWeight);
     input.value = weight;
     input.setAttribute("aria-valuetext", `${weight} px`);
     output.value = `${weight} px`;
     sample.style.setProperty("--stroke-diameter", `${weight}px`);
   }
-  const selectedStyles = new Set([...selection].filter(hasLineStyle).map(object => object.lineStyle));
+  strokeWidthButton.disabled = strokeSliders.every(slider => slider.input.disabled);
+  const selectedStyles = new Set(selected.filter(hasLineStyle).map(object => object.lineStyle));
+  lineStyleButton.disabled = !editsDefaults && selectedStyles.size === 0;
   const displayedStyle = selectedStyles.size > 1 ? null : [...selectedStyles][0] ?? lineStyle;
   for (const input of lineStyleInputs) input.checked = input.value === displayedStyle;
   mixedLineStyles.hidden = displayedStyle !== null;
@@ -519,10 +591,27 @@ function updateControls() {
   lineStyleCaption.textContent = styleName;
   lineStyleButton.setAttribute("aria-label", styleButtonName);
   lineStyleButton.title = styleButtonName;
-  const empty = objects.length === 0 && !textEdit;
+  const selectedLines = selected.filter(hasLineEnds);
+  lineEndsButton.disabled = !editsDefaults && selectedLines.length === 0;
+  const endDescriptions = [];
+  for (const [control, flag, key] of lineEndControls) {
+    const values = new Set(selectedLines.map(object => (object.lineEnds ?? 0) & flag));
+    const displayed = [...values][0] ?? (defaultLineEnds & flag);
+    control.indeterminate = values.size > 1;
+    control.checked = !control.indeterminate && Boolean(displayed);
+    const icon = lineEndsButton.querySelector(`[data-line-end="${key}"]`);
+    icon.toggleAttribute("hidden", !control.checked && !control.indeterminate);
+    icon.toggleAttribute("data-mixed", control.indeterminate);
+    endDescriptions.push(`${label(key)} — ${label(control.indeterminate ? "lineEndsMixed" :
+      control.checked ? "lineEndArrow" : "lineEndNone")}`);
+  }
+  const endsName = `${label("lineEnds")} (${endDescriptions.join(" · ")})`;
+  lineEndsButton.setAttribute("aria-label", endsName);
+  lineEndsButton.title = endsName;
+  const empty = objects.length === 0 && !textEdit && (polylineDraft?.points.length ?? 0) < 2;
   for (const button of fullExportButtons) button.disabled = empty;
   clearButton.disabled = empty && !drawingId;
-  undoButton.disabled = undoHistory.length === 0;
+  undoButton.disabled = !polylineDraft && undoHistory.length === 0;
   const object = singleSelection();
   selectionActions.hidden = !selection.size || Boolean(crop || textEdit);
   cropActions.hidden = !crop;
@@ -535,20 +624,25 @@ function updateControls() {
   ungroupButton.hidden = ![...selection].some(item => item.groupId);
   backButton.disabled = lowerButton.disabled = !canMoveLayers(-1);
   frontButton.disabled = raiseButton.disabled = !canMoveLayers(1);
-  emptyHint.hidden = objects.length > 0 || Boolean(draft || textEdit) || laserPoints.length > 0;
+  emptyHint.hidden = objects.length > 0 || Boolean(draft || polylineDraft || textEdit) || laserPoints.length > 0;
   updateZoomControls();
   const hints = {
     select: touchLayout.matches ? "marqueeHint" : "clickSelectionHint",
     text: "textHint",
     pan: touchLayout.matches ? "touchPanHint" : "panHint",
     line: touchLayout.matches ? "touchDrawHint" : "segmentHint",
-    arrow: touchLayout.matches ? "touchDrawHint" : "segmentHint",
-    rect: touchLayout.matches ? "touchDrawHint" : "shapeHint",
-    circle: touchLayout.matches ? "touchDrawHint" : "shapeHint",
+    polyline: touchLayout.matches ? "polylineTouchHint" : "polylineHint",
   };
-  let hint = hints[activeTool] || (touchLayout.matches ? "touchDrawHint" : "drawHint");
+  let hint = hints[activeTool] || "drawHint";
+  if (isFillableShape(activeTool) && activeTool !== "hexagon") hint = "shapeHint";
+  if (touchLayout.matches && (hint === "drawHint" || hint === "shapeHint")) hint = "touchDrawHint";
   if (selectedSegment()) hint = touchLayout.matches ? "endpointsHint" : "endpointsSnapHint";
   else if (selection.size) hint = touchLayout.matches ? "selectHint" : "resizeHint";
+  if (object?.type === "polyline") hint = "polylineEditHint";
+  if (object?.type === "trapezoid") hint = "trapezoidAdjustmentHint";
+  if (object?.type === "blockArrow") hint = "blockArrowAdjustmentHint";
+  if (object?.type === "callout") hint = "calloutAdjustmentHint";
+  if (object?.type === "parallelogram") hint = "parallelogramAdjustmentHint";
   if (crop) hint = "cropHint";
   if (textEdit) hint = "textEditHint";
   toolHint.textContent = label(hint);
@@ -691,7 +785,7 @@ function draw(now) {
   }
 
   const showDraft = draft && draft.type !== "marker";
-  const showSelection = selection.size > 0 && !textEdit && !draft;
+  const showSelection = selection.size > 0 && !textEdit && !draft && !polylineDraft;
   const showMarquee = gesture?.kind === "marquee";
   if (laserPoints.length) {
     laserPoints = laserPoints.filter(point => now - point.time < laserDuration);
@@ -703,7 +797,7 @@ function draw(now) {
     context.clearRect(left, top, right - left, bottom - top);
   }
   overlayRegions = [];
-  if (showDraft || showSelection || showMarquee || laserPoints.length) {
+  if (showDraft || polylineDraft || showSelection || showMarquee || laserPoints.length) {
     const bounds = [];
     context.save();
     setViewTransform(context, pixelRatio);
@@ -711,6 +805,7 @@ function draw(now) {
       drawObject(context, draft);
       bounds.push(worldBounds(draft));
     }
+    if (polylineDraft) bounds.push(...drawPolylineDraft());
     if (showSelection) bounds.push(...drawSelection());
     if (showMarquee) {
       drawMarquee(gesture.bounds);
@@ -746,8 +841,8 @@ function corners(bounds) {
 }
 
 function drawSelection() {
-  const segment = selectedSegment();
-  if (segment) return drawEndpoints(segment);
+  const line = singleSelection();
+  if (hasLineEnds(line)) return drawLineHandles(line, lineVertices(line));
   const image = crop ? singleSelection() : null;
   const frame = image || selectionFrame();
   const bounds = crop || frame.bounds;
@@ -785,6 +880,14 @@ function drawSelection() {
     context.arc(knob.x, knob.y, 4.5 * unit, 0, Math.PI * 2);
     context.fill();
     context.stroke();
+
+    const shape = singleSelection();
+    context.fillStyle = "#ffbe79";
+    context.strokeStyle = "#061324";
+    for (const { point } of shapeAdjustmentHandles(shape)) {
+      const { x, y } = objectToWorld(shape, point);
+      drawDiamond(x, y, 5 * unit);
+    }
   }
   context.restore();
   const paintedBounds = image ? image.bounds : { ...bounds, top: rotationHandle(bounds).y };
@@ -793,17 +896,33 @@ function drawSelection() {
 }
 
 function segmentEndpoints(object) {
-  return [objectToWorld(object, { x: 0, y: 0 }), objectToWorld(object, object.end)];
+  return lineVertices(object).map(point => objectToWorld(object, point));
 }
 
-function drawEndpoints(object) {
+function lineVertices(object) {
+  return object.type === "polyline" ? object.points : [{ x: 0, y: 0 }, object.end];
+}
+
+function drawDiamond(x, y, radius) {
+  context.beginPath();
+  traceCorners([{ x, y: y - radius }, { x: x + radius, y }, { x, y: y + radius }, { x: x - radius, y }]);
+  context.fill();
+  context.stroke();
+}
+
+function drawLineHandles(object, vertices) {
   const unit = 1 / view.zoom;
-  const points = segmentEndpoints(object);
+  const points = vertices.map(point => objectToWorld(object, point));
   context.save();
-  context.strokeStyle = "#9ceaff";
-  context.fillStyle = "#061324";
   context.lineWidth = unit;
-  for (const { x, y } of points) {
+  for (const [index, { x, y }] of points.entries()) {
+    const endpoint = index === 0 || index === points.length - 1;
+    context.strokeStyle = endpoint ? "#9ceaff" : "#061324";
+    context.fillStyle = endpoint ? "#061324" : "#ffbe79";
+    if (!endpoint) {
+      drawDiamond(x, y, 5 * unit);
+      continue;
+    }
     context.beginPath();
     context.arc(x, y, 5 * unit, 0, Math.PI * 2);
     context.fill();
@@ -811,6 +930,59 @@ function drawEndpoints(object) {
   }
   context.restore();
   return points.map(point => padBounds(rectangleBetween(point, point), 6 * unit));
+}
+
+function styledPolyline(object, points) {
+  Object.assign(object, { color, lineStyle, weight: strokeWeights.stroke, lineEnds: defaultLineEnds });
+  setPolylinePoints(object, points);
+  return object;
+}
+
+function polylinePoint(object, point, snap) {
+  const last = object.points.at(-1);
+  const local = worldToObject(object, point);
+  return snap ? snapSegmentEnd(last, local) : local;
+}
+
+function drawPolylineDraft() {
+  const points = polylineDraft.points;
+  const hover = canvasPointer && !gesture && !spaceHeld
+    ? polylinePoint(polylineDraft, worldPoint(screenPoint(canvasPointer)), polylineSnap)
+    : null;
+  const preview = styledPolyline({ ...polylineDraft }, hover ? [...points, hover] : points);
+  drawObject(context, preview);
+  return [worldBounds(preview), ...drawLineHandles(preview, points)];
+}
+
+function addPolylinePoint(point, snap) {
+  if (!polylineDraft) {
+    setSelection([]);
+    polylineDraft = createObject("polyline", point, color);
+    polylineDraft.points = [{ x: 0, y: 0 }];
+    return;
+  }
+  const next = polylinePoint(polylineDraft, point, snap);
+  if (distanceBetween(polylineDraft.points.at(-1), next) * view.zoom < 2) return;
+  polylineDraft.points.push(next);
+}
+
+function finishPolyline() {
+  if (!polylineDraft) return false;
+  const object = polylineDraft;
+  polylineDraft = null;
+  if (object.points.length > 1) {
+    objects.push(styledPolyline(object, object.points));
+    setSelection([object], { fromDrawing: true });
+    commitSceneEdit();
+  }
+  updateControls();
+  requestDraw();
+  return true;
+}
+
+function polylineDraftSnapshot() {
+  if (polylineDraft?.points.length > 1) return styledPolyline({ ...polylineDraft }, polylineDraft.points.slice());
+  return null;
 }
 
 function traceCorners([first, ...rest]) {
@@ -913,7 +1085,7 @@ function selectionFrame() {
 }
 
 function startResize(point, drawing) {
-  if (!selection.size || selectedSegment()) return null;
+  if (!selection.size || hasLineEnds(singleSelection())) return null;
   const frame = selectionFrame();
   const { bounds } = frame;
   // Leave space for closely spaced brush strokes while a drawing tool is active.
@@ -937,6 +1109,66 @@ function startEndpointDrag(point, additive) {
     kind: "endpoint", object, original: { ...object }, start: point,
     movingStart, handle: movingStart ? startHandle : endHandle, anchor: movingStart ? endHandle : startHandle,
     toggleObject: additive ? objectAt(point) : null,
+  };
+}
+
+function startPolylineVertex(point, additive) {
+  const object = singleSelection();
+  if (object?.type !== "polyline") return null;
+  let nearest = (touchLayout.matches ? 16 : 10) / view.zoom;
+  let index = -1;
+  object.points.forEach((vertex, candidate) => {
+    const distance = distanceBetween(point, objectToWorld(object, vertex));
+    if (distance >= nearest) return;
+    nearest = distance;
+    index = candidate;
+  });
+  if (index < 0) return null;
+  return {
+    kind: "polylineVertex", object, original: { ...object }, index, start: point,
+    handle: objectToWorld(object, object.points[index]),
+    anchor: objectToWorld(object, object.points[index === 0 ? 1 : index - 1]),
+    toggleObject: additive ? objectAt(point) : null,
+  };
+}
+
+function restorePolylineVertex({ object, original: { points, path, arrowhead, bounds } }) {
+  Object.assign(object, { points, path, arrowhead, bounds });
+}
+
+function movePolylineVertex(point, constrained) {
+  const { object, original, index, start, handle, anchor } = gesture;
+  if (point.x === start.x && point.y === start.y) {
+    restorePolylineVertex(gesture);
+    return;
+  }
+  const target = { x: handle.x + (point.x - start.x), y: handle.y + (point.y - start.y) };
+  // Match straight lines by snapping in canvas coordinates, even after object transforms.
+  const vertex = constrained ? snapSegmentEnd(anchor, target) : target;
+  if (constrained && distanceBetween(anchor, vertex) < 1e-6) return;
+  const points = original.points.slice();
+  points[index] = worldToObject(original, vertex);
+  setPolylinePoints(object, points);
+}
+
+function startShapeAdjustment(point, additive) {
+  const object = singleSelection();
+  let nearest = (touchLayout.matches ? 16 : 10) / view.zoom;
+  let handle = null;
+  for (const adjustment of shapeAdjustmentHandles(object)) {
+    const distance = distanceBetween(point, objectToWorld(object, adjustment.point));
+    if (distance >= nearest) continue;
+    nearest = distance;
+    handle = adjustment.kind;
+  }
+  if (!handle) return null;
+  // A wide trapezoid can put its diamond next to a resize corner.
+  const frame = selectionFrame();
+  const resize = handleAt(frame.bounds, point, nearest * view.zoom, frame);
+  if (resize) return null;
+  return {
+    kind: "adjustShape", object, original: { ...object }, start: point, handle,
+    localStart: worldToObject(object, point), toggleObject: additive ? objectAt(point) : null,
   };
 }
 
@@ -979,7 +1211,7 @@ function startSelection(point, additive) {
   const object = objectAt(point);
   if (additive) return { kind: "toggle", toggleObject: object };
   if (object) {
-    if (!selection.has(object)) setSelection([object]);
+    if (selectionFromDrawing || !selection.has(object)) setSelection([object]);
     return { kind: "move", transforms: selectionTransforms() };
   }
   setSelection([]);
@@ -1012,7 +1244,7 @@ function rotationState(frame) {
 }
 
 function startRotation(point) {
-  if (!selection.size || selectedSegment() || crop || textEdit) return null;
+  if (!selection.size || hasLineEnds(singleSelection()) || crop || textEdit) return null;
   const frame = selectionFrame();
   if (distanceBetween(point, objectToWorld(frame, rotationHandle(frame.bounds))) > 11 / view.zoom) return null;
   const rotation = rotationState(frame);
@@ -1191,16 +1423,15 @@ function startPointer(event) {
   }
 
   const pan = spaceHeld || event.button !== 0 || activeTool === "pan";
-  const endpoint = !pan && activeTool !== "laser" ? startEndpointDrag(point, primaryModifier(event)) : null;
-  const rotation = !pan && activeTool !== "laser" ? startRotation(point) : null;
-  const resize = !pan && !["select", "laser", "text"].includes(activeTool)
-    ? startResize(point, true) : null;
+  const canEdit = !pan && activeTool !== "laser" && !polylineDraft;
+  const additive = primaryModifier(event);
+  const edit = canEdit && (startEndpointDrag(point, additive) || startPolylineVertex(point, additive) ||
+    startShapeAdjustment(point, additive) || startRotation(point));
+  const resize = canEdit && !["select", "text"].includes(activeTool) ? startResize(point, true) : null;
   if (pan) {
     gesture = { kind: "pan", id: event.pointerId, start: screen, x: view.x, y: view.y };
-  } else if (endpoint) {
-    gesture = { ...endpoint, id: event.pointerId };
-  } else if (rotation) {
-    gesture = { ...rotation, id: event.pointerId };
+  } else if (edit) {
+    gesture = { ...edit, id: event.pointerId };
   } else if (activeTool === "select") {
     gesture = startSelection(point, primaryModifier(event));
     if (gesture) Object.assign(gesture, { id: event.pointerId, start: gesture.start ?? point });
@@ -1213,14 +1444,17 @@ function startPointer(event) {
     gesture = { kind: "laser", id: event.pointerId };
     laserStroke += 1;
     pushLaser(point);
+  } else if (activeTool === "polyline") {
+    gesture = { kind: "polylinePoint", id: event.pointerId, start: point };
   } else {
     const freehand = activeTool === "brush" || activeTool === "marker";
     const weight = strokeWeights[strokeKind(activeTool)];
     draft = freehand ? createStroke(activeTool, point, color, weight) : createObject(activeTool, point, color);
     if (hasLineStyle(draft)) draft.lineStyle = lineStyle;
-    if (isFillable(draft)) setShapeFill(draft);
+    if (isFillableShape(draft.type)) setShapeFill(draft);
     if (!freehand) {
       draft.weight = weight;
+      if (isSegment(draft)) draft.lineEnds = defaultLineEnds;
       updateShape(draft, point);
     }
     gesture = { kind: freehand ? "stroke" : "shape", start: point, id: event.pointerId };
@@ -1266,6 +1500,17 @@ function movePointer(event) {
       moveEndpoint(point, primaryModifier(event));
       sceneDirty = true;
       break;
+    case "polylineVertex":
+      movePolylineVertex(point, primaryModifier(event));
+      sceneDirty = true;
+      break;
+    case "adjustShape": {
+      const { object, original, handle, localStart } = gesture;
+      const { x, y } = worldToObject(original, point);
+      adjustShape(object, original, handle, x - localStart.x, y - localStart.y);
+      sceneDirty = true;
+      break;
+    }
     case "rotate":
       updateRotation(point, primaryModifier(event));
       sceneDirty = true;
@@ -1295,7 +1540,12 @@ function cancelGesture() {
   }
   if (gesture?.kind === "crop") crop = gesture.original;
   if (gesture?.kind === "endpoint") restoreEndpoint(gesture);
-  if (gesture?.transforms || gesture?.kind === "endpoint") sceneDirty = true;
+  if (gesture?.kind === "polylineVertex") restorePolylineVertex(gesture);
+  if (gesture?.kind === "adjustShape") {
+    const { shapeAdjustments, path, bounds } = gesture.original;
+    Object.assign(gesture.object, { shapeAdjustments, path, bounds });
+  }
+  if (gesture?.transforms || ["endpoint", "polylineVertex", "adjustShape"].includes(gesture?.kind)) sceneDirty = true;
   gesture = null;
   draft = null;
 }
@@ -1323,9 +1573,12 @@ function finishPointer(event, cancelled) {
       ) && !dragged(2) ? objectAt(start) : null;
       if (clickedObject) {
         toggleSelection(clickedObject);
+      } else if (kind === "polylinePoint" && !dragged(6)) {
+        polylineSnap = primaryModifier(event);
+        addPolylinePoint(worldPoint(screenPoint(event)), polylineSnap);
       } else if (kind === "stroke" || (kind === "shape" && dragged(2))) {
         objects.push(draft);
-        setSelection([draft]);
+        setSelection([draft], { fromDrawing: true });
         commitSceneEdit();
       }
       if (toggleObject && !dragged(2)) {
@@ -1345,7 +1598,7 @@ function finishPointer(event, cancelled) {
             containsPoint(bounds, { x: area.right, y: area.bottom });
         }));
       }
-      if (kind === "move" || kind === "resize" || kind === "rotate" || kind === "endpoint") commitSceneEdit();
+      if (["move", "resize", "rotate", "endpoint", "polylineVertex", "adjustShape"].includes(kind)) commitSceneEdit();
       if (kind === "pan") persistScene(false);
     }
   }
@@ -1403,7 +1656,7 @@ function finishTextEdit(apply, focusCanvas = false) {
     measureTextObject(context, object);
     if (isNew) objects.push(object);
     activeTool = "select";
-    setSelection([object]);
+    setSelection([object], { fromDrawing: isNew });
     commitSceneEdit();
   } else {
     updateControls();
@@ -1542,7 +1795,7 @@ function snapshotDrawing() {
       (object[key] ?? propertyDefaults[key]) === (entry.state[key] ?? propertyDefaults[key]))) return entry;
     // Completed geometry and image data are shared; edits replace these values when needed.
     const state = { ...object, groupId: object.groupId, fill: object.fill, fillTransparency: object.fillTransparency,
-      angle: object.angle, shear: object.shear };
+      angle: object.angle, shear: object.shear, shapeAdjustments: object.shapeAdjustments };
     return { object, state };
   });
 }
@@ -1560,6 +1813,16 @@ function commitSceneEdit() {
 }
 
 function undoEdit() {
+  if (polylineDraft) {
+    cancelGesture();
+    polylineDraft.points.pop();
+    if (!polylineDraft.points.length) polylineDraft = null;
+    canvas.focus({ preventScroll: true });
+    updateControls();
+    requestDraw();
+    announce("undone");
+    return;
+  }
   finishTextEdit(true);
   if (!undoHistory.length) return;
   cancelGesture();
@@ -1570,6 +1833,7 @@ function undoEdit() {
   setExportOptions(false);
   const entries = undoHistory.pop();
   const previousSelection = new Set(selection);
+  const fromDrawing = selectionFromDrawing;
   objects.length = 0;
   for (const { object, state } of entries) {
     Object.assign(object, state);
@@ -1578,15 +1842,17 @@ function undoEdit() {
   }
   committedObjects = entries;
   if (!objects.length) activeTool = "brush";
-  setSelection(objects.filter(object => previousSelection.has(object)));
+  setSelection(objects.filter(object => previousSelection.has(object)), { fromDrawing });
   requestSceneDraw();
   persistScene();
   canvas.focus({ preventScroll: true });
   announce("undone");
 }
 
-function currentPaintScene() {
+function currentPaintScene(includePolyline = false) {
   const savedObjects = objects.map(savePaintObject);
+  const line = includePolyline ? polylineDraftSnapshot() : null;
+  if (line) savedObjects.push(savePaintObject(line));
   if (textEdit && textContent.value.trim()) {
     const savedText = savePaintObject({ ...textEdit.object, text: textContent.value });
     if (textEdit.isNew) savedObjects.push(savedText);
@@ -1601,6 +1867,7 @@ function currentPaintScene() {
     fillTransparency,
     strokeWeights: { ...strokeWeights },
     lineStyle,
+    lineEnds: defaultLineEnds,
   };
 }
 
@@ -1628,6 +1895,8 @@ function persistScene(updateDetails = true) {
 }
 
 function applyPaintScene(saved, restored) {
+  polylineDraft = null;
+  selectionFromDrawing = false;
   sceneGeneration++;
   saveRevision++;
   clearTimeout(viewSaveTimer);
@@ -1641,6 +1910,7 @@ function applyPaintScene(saved, restored) {
   fillTransparency = saved.fillTransparency ?? defaultColors.fillTransparency;
   Object.assign(strokeWeights, defaultStrokeWeights, saved.strokeWeights);
   lineStyle = saved.lineStyle ?? "solid";
+  defaultLineEnds = saved.lineEnds ?? 0;
   setProjectDirty(false);
   undoHistory.length = 0;
   committedObjects = snapshotDrawing();
@@ -1820,6 +2090,7 @@ async function switchPaintBoard(id) {
     return;
   }
   switchingBoard = true;
+  finishPolyline();
   sceneGeneration++;
   cancelGesture();
   boardsStatus.textContent = label("openingBoard");
@@ -1948,7 +2219,7 @@ async function sharePaintScene() {
   preparingShare = true;
   try {
     finishTextEdit(true);
-    const scene = currentPaintScene();
+    const scene = currentPaintScene(true);
     const fileName = paintFileName("xpaint");
     announce("preparingLink");
     const urlPromise = Promise.resolve().then(() => makePaintShareUrl(scene));
@@ -1990,7 +2261,7 @@ function saveProjectFile() {
   try {
     finishTextEdit(true);
     if (viewSaveTimer !== undefined) persistScene(false);
-    const project = packPaintProject(currentPaintScene());
+    const project = packPaintProject(currentPaintScene(true));
     downloadPaintBlob(project, paintFileName("xpaint"));
     setProjectDirty(false);
     announce("projectSaved");
@@ -2001,6 +2272,7 @@ function saveProjectFile() {
 
 function resetPaintInteraction() {
   cancelGesture();
+  polylineDraft = null;
   pointers.clear();
   closeTextEditor();
   closePalette();
@@ -2008,6 +2280,7 @@ function resetPaintInteraction() {
   crop = null;
   laserPoints.length = 0;
   selection.clear();
+  selectionFromDrawing = false;
   setExportOptions(false);
 }
 
@@ -2049,7 +2322,7 @@ function toggleExportOptions() {
 
 function exportImage(action, full) {
   finishTextEdit(true);
-  if (full && !objects.length) return;
+  if (full && !objects.length && (polylineDraft?.points.length ?? 0) < 2) return;
   setExportOptions(false);
   exportButton.focus({ preventScroll: true });
   if (action === "copy") copyImage(full);
@@ -2057,12 +2330,14 @@ function exportImage(action, full) {
 }
 
 async function capturePng(full) {
-  const area = full ? wholeArea(objects, 24) : {
+  const line = polylineDraftSnapshot();
+  const artwork = line ? [...objects, line] : objects;
+  const area = full ? wholeArea(artwork, 24) : {
     ...view,
     width: canvas.clientWidth,
     height: canvas.clientHeight,
   };
-  return framedImage(objects, area, stage);
+  return framedImage(artwork, area, stage);
 }
 
 async function downloadImage(full) {
@@ -2088,9 +2363,16 @@ canvas.addEventListener("pointermove", event => {
   if (event.pointerType !== "touch") {
     canvasPointer = { clientX: event.clientX, clientY: event.clientY };
   }
+  if (polylineDraft) {
+    polylineSnap = primaryModifier(event);
+    requestDraw();
+  }
   movePointer(event);
 });
-canvas.addEventListener("pointerleave", () => { canvasPointer = null; });
+canvas.addEventListener("pointerleave", () => {
+  canvasPointer = null;
+  if (polylineDraft) requestDraw();
+});
 canvas.addEventListener("pointerup", event => finishPointer(event, false));
 canvas.addEventListener("pointercancel", event => finishPointer(event, true));
 canvas.addEventListener("lostpointercapture", event => finishPointer(event, true));
@@ -2122,8 +2404,10 @@ canvas.addEventListener("keydown", event => {
   const { key } = event;
   if (key === "Escape") {
     cancelGesture();
-    if (crop) finishCrop(false);
-    else setSelection([]);
+    if (!finishPolyline()) {
+      if (crop) finishCrop(false);
+      else setSelection([]);
+    }
   } else if (key === " ") {
     spaceHeld = true;
     updateControls();
@@ -2168,13 +2452,19 @@ canvas.addEventListener("keydown", event => {
 });
 
 function updateConstrainedGesture(event) {
-  if (!gesture || event.key !== modifierKey) return;
-  if (!["resize", "shape", "rotate", "endpoint"].includes(gesture.kind)) return;
+  if (event.key !== modifierKey) return;
+  if (polylineDraft) {
+    polylineSnap = primaryModifier(event);
+    requestDraw();
+  }
+  if (!gesture) return;
+  if (!["resize", "shape", "rotate", "endpoint", "polylineVertex"].includes(gesture.kind)) return;
   const point = worldPoint(pointers.get(gesture.id));
   const constrained = primaryModifier(event);
   if (gesture.kind === "resize") resizeSelection(point, constrained);
   else if (gesture.kind === "rotate") updateRotation(point, constrained);
   else if (gesture.kind === "endpoint") moveEndpoint(point, constrained);
+  else if (gesture.kind === "polylineVertex") movePolylineVertex(point, constrained);
   else updateShape(draft, point, constrained);
   if (gesture.kind === "shape") requestDraw();
   else requestSceneDraw();
@@ -2196,6 +2486,11 @@ document.addEventListener("keydown", event => {
   if (!exportOptions.hidden && event.key === "Escape") {
     setExportOptions(false);
     exportButton.focus({ preventScroll: true });
+    return;
+  }
+  if (event.key === "Escape" && finishPolyline()) {
+    event.preventDefault();
+    canvas.focus({ preventScroll: true });
     return;
   }
   const { code, target } = event;

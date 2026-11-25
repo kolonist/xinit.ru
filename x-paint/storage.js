@@ -128,14 +128,14 @@ function migratePaintScene(database, key) {
 
 function savePaintObject(object) {
   const { type, x, y, scaleX, scaleY, color, fill, fillTransparency, end, points, text, blob, source, groupId } = object;
-  const { angle, shear, weight, lineStyle } = object;
+  const { angle, shear, weight, lineStyle, shapeAdjustments, lineEnds } = object;
   return { type, x, y, scaleX, scaleY, color, fill, fillTransparency, end, points, text, blob, source,
-    groupId, angle, shear, weight, lineStyle };
+    groupId, angle, shear, weight, lineStyle, shapeAdjustments, lineEnds };
 }
 
 async function restorePaintObject(saved, context) {
   const { type, x, y, scaleX, scaleY, color, fill, fillTransparency, end, points, text, blob, source } = saved;
-  let object = createObject(type, { x, y }, color);
+  let object = createObject(type === "arrow" ? "line" : type, { x, y }, color);
   switch (type) {
     case "brush":
     case "marker":
@@ -143,17 +143,11 @@ async function restorePaintObject(saved, context) {
       if (type === "brush") object.lineStyle = saved.lineStyle ?? "solid";
       for (const point of points.slice(1)) appendStrokePoint(object, point);
       break;
-    case "rect":
-    case "circle":
-    case "line":
-    case "arrow":
+    case "polyline":
       object.weight = saved.weight;
       object.lineStyle = saved.lineStyle ?? "solid";
-      setShapeEnd(object, end);
-      if (fill) {
-        object.fill = fill;
-        object.fillTransparency = fillTransparency ?? 0;
-      }
+      object.lineEnds = saved.lineEnds ?? 0;
+      setPolylinePoints(object, points);
       break;
     case "text":
       object.text = text;
@@ -166,7 +160,17 @@ async function restorePaintObject(saved, context) {
       object.bounds = { left: 0, top: 0, right: source.width, bottom: source.height };
       break;
     default:
-      throw new Error("Unknown drawing object");
+      if (!isFillableShape(type) && !isSegment(object)) throw new Error("Unknown drawing object");
+      object.weight = saved.weight;
+      object.lineStyle = saved.lineStyle ?? "solid";
+      if (isSegment(object)) object.lineEnds = saved.lineEnds ?? (type === "arrow" ? lineEndArrow : 0);
+      object.shapeAdjustments = saved.shapeAdjustments;
+      setShapeEnd(object, end);
+      if (fill) {
+        object.fill = fill;
+        object.fillTransparency = fillTransparency ?? 0;
+      }
+      break;
   }
   object.scaleX = scaleX;
   object.scaleY = scaleY;

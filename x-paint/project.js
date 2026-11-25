@@ -4,7 +4,10 @@ const paintProjectVersion = 1;
 const paintSharePrefix = "#paint=";
 const paintShareLimit = 11000;
 const paintShareBytes = 8 * 1024 * 1024;
-const paintProjectTypes = ["brush", "marker", "rect", "circle", "line", "arrow", "text", "image"];
+// Type indexes are saved in .xpaint files and share links.
+const paintProjectTypes = ["brush", "marker", "rect", "circle", "line", "arrow", "text", "image",
+  "blockArrow", "triangle", "trapezoid", "hexagon", "diamond", "parallelogram", "callout", "cylinder", "roundedRect", "cloud",
+  "polyline"];
 const paintProjectLineStyles = ["solid", "dashed", "dotted"];
 const paintPointPrecision = 8;
 
@@ -12,7 +15,7 @@ function packPaintProject(scene, forLink = false) {
   // A length-prefixed JSON header describes the objects and points to binary data after it.
   const { view, color, backgroundColor, fillEnabled, fillTransparency, strokeWeights, lineStyle } = scene;
   const settings = [view.x, view.y, view.zoom, color, backgroundColor, fillEnabled, fillTransparency,
-    strokeWeights.stroke, strokeWeights.marker, paintProjectLineStyles.indexOf(lineStyle)];
+    strokeWeights.stroke, strokeWeights.marker, paintProjectLineStyles.indexOf(lineStyle), scene.lineEnds ?? 0];
   const parts = [];
   const images = new Map();
   let offset = 0;
@@ -46,6 +49,8 @@ function packPaintProject(scene, forLink = false) {
       object.groupId,
       weight === (type === "marker" ? defaultMarkerWeight : defaultStrokeWeight) ? null : weight,
       object.lineStyle && object.lineStyle !== "solid" ? paintProjectLineStyles.indexOf(object.lineStyle) : null,
+      object.shapeAdjustments,
+      object.lineEnds || null,
     ];
     while (options.length && options.at(-1) == null) options.pop();
     const record = [paintProjectTypes.indexOf(type), x, y, color, data];
@@ -119,6 +124,30 @@ function isPaintProjectColor(value) {
   return typeof value === "string" && /^#[a-f\d]{6}$/i.test(value);
 }
 
+function readShapeAdjustments(type, saved) {
+  if (saved == null) return undefined;
+  checkPaintProject(typeof saved === "object" && !Array.isArray(saved));
+  if (type === "callout") {
+    const { tailX, tailY } = saved;
+    checkPaintProject(Number.isFinite(tailX) && Number.isFinite(tailY));
+    return { tailX, tailY };
+  }
+  const inRange = (value, min, max) => Number.isFinite(value) && value >= min && value <= max;
+  if (type === "parallelogram") {
+    checkPaintProject(inRange(saved.slant, -maxParallelogramSlant, maxParallelogramSlant));
+    return { slant: saved.slant };
+  }
+  if (type === "trapezoid") {
+    checkPaintProject(inRange(saved.topInset, 0, 0.48));
+    return { topInset: saved.topInset };
+  }
+  const { headBase, headInset, shaftInset } = saved;
+  checkPaintProject(type === "blockArrow" && inRange(headBase, 0.08, 0.92) &&
+    inRange(headInset, 0, 0.46 - arrowInsetGap) && inRange(shaftInset, arrowInsetGap, 0.46) &&
+    headInset + arrowInsetGap <= shaftInset + 1e-9);
+  return { headBase, headInset, shaftInset };
+}
+
 async function unpackPaintProject(project) {
   checkPaintProject(project.size >= 4);
   const headerSize = new DataView(await project.slice(0, 4).arrayBuffer()).getUint32(0);
@@ -134,18 +163,19 @@ async function unpackPaintProject(project) {
       size > 0 && offset + size <= project.size - payloadStart);
     return project.slice(payloadStart + offset, payloadStart + offset + size, type);
   }
-  const [viewX, viewY, zoom, color, backgroundColor, fillEnabled, fillTransparency, stroke, marker, style] = settings;
+  const [viewX, viewY, zoom, color, backgroundColor, fillEnabled, fillTransparency, stroke, marker, style, lineEnds = 0] = settings;
   checkPaintProject([viewX, viewY, zoom, fillTransparency, stroke, marker].every(Number.isFinite) &&
     zoom >= 0.1 && zoom <= 8 && isPaintProjectColor(color) && isPaintProjectColor(backgroundColor) &&
     typeof fillEnabled === "boolean" && fillTransparency >= 0 && fillTransparency <= 100 &&
     stroke >= 1 && stroke <= 32 && marker >= 1 && marker <= 64 &&
-    Number.isInteger(style) && paintProjectLineStyles[style]);
+    Number.isInteger(style) && paintProjectLineStyles[style] &&
+    Number.isInteger(lineEnds) && lineEnds >= 0 && lineEnds <= 3);
   const images = new Map();
   const objects = await Promise.all(records.map(async record => {
     checkPaintProject(Array.isArray(record));
     const [kind, x, y, color, data, options = []] = record;
     checkPaintProject(Array.isArray(options) && Number.isInteger(kind) && paintProjectTypes[kind]);
-    const [scaleX, scaleY, angle, shear, fill, transparency, groupId, weight, line] = options;
+    const [scaleX, scaleY, angle, shear, fill, transparency, groupId, weight, line, savedShapeAdjustments, savedLineEnds] = options;
     const type = paintProjectTypes[kind];
     checkPaintProject([x, y, scaleX ?? 1, scaleY ?? 1, angle ?? 0, shear ?? 0].every(Number.isFinite) &&
       (scaleX ?? 1) !== 0 && (scaleY ?? 1) !== 0 && (type === "image" || isPaintProjectColor(color)) &&
@@ -156,6 +186,11 @@ async function unpackPaintProject(project) {
       (weight == null || (Number.isFinite(weight) && weight >= 1 && weight <= 64)));
     const object = { type, x, y, color, scaleX: scaleX ?? 1, scaleY: scaleY ?? 1, angle, shear,
       fill, fillTransparency: transparency, groupId, weight: weight ?? undefined, lineStyle: paintProjectLineStyles[line] };
+    object.shapeAdjustments = readShapeAdjustments(type, savedShapeAdjustments);
+    if (savedLineEnds != null) {
+      checkPaintProject(hasLineEnds(object) && Number.isInteger(savedLineEnds) && savedLineEnds >= 0 && savedLineEnds <= 3);
+      object.lineEnds = savedLineEnds;
+    }
     if (type === "text") {
       checkPaintProject(typeof data === "string");
       object.text = data;
@@ -169,15 +204,15 @@ async function unpackPaintProject(project) {
         if (!images.has(key)) images.set(key, readPart(offset, size, mime));
         object.blob = images.get(key);
         object.source = { x, y, width, height };
-      } else if (type === "brush" || type === "marker") {
+      } else if (type === "brush" || type === "marker" || type === "polyline") {
         let coordinates = data;
         if (forLink) {
           checkPaintProject(data.length === 2);
           const [offset, size] = data;
           coordinates = unpackPaintPoints(new Uint8Array(await readPart(offset, size).arrayBuffer()));
         }
-        checkPaintProject(coordinates.length >= 2 && coordinates.length % 2 === 0 &&
-          coordinates[0] === 0 && coordinates[1] === 0 && coordinates.every(Number.isFinite));
+        const validStart = type === "polyline" ? coordinates.length >= 4 : coordinates[0] === 0 && coordinates[1] === 0;
+        checkPaintProject(validStart && coordinates.length % 2 === 0 && coordinates.every(Number.isFinite));
         object.points = [];
         for (let index = 0; index < coordinates.length; index += 2) {
           object.points.push({ x: coordinates[index], y: coordinates[index + 1] });
@@ -190,7 +225,7 @@ async function unpackPaintProject(project) {
     return object;
   }));
   return { objects, view: { x: viewX, y: viewY, zoom }, color, backgroundColor, fillEnabled, fillTransparency,
-    strokeWeights: { stroke, marker }, lineStyle: paintProjectLineStyles[style] };
+    strokeWeights: { stroke, marker }, lineStyle: paintProjectLineStyles[style], lineEnds };
 }
 
 async function makePaintShareUrl(scene) {

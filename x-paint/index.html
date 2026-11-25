@@ -50,6 +50,8 @@
       </fieldset>
       <div class="stroke-tools"></div>
     </aside>
+    <div class="control-group paint-popup shape-library" id="shape-library" role="group"
+      data-i18n-label="shapeLibrary" aria-label="Библиотека фигур" hidden></div>
     <div class="control-group paint-popup palette-popup" id="palette-popup" role="group"
       data-i18n-label="colors" aria-label="Цвет" hidden>
       <div class="swatch-grid" id="palette"></div>
@@ -93,6 +95,17 @@
         <svg viewBox="0 0 48 12" aria-hidden="true"><path d="M2 6h44" stroke-dasharray="0.01 7.3"/></svg>
       </label>
       <p class="line-style-mixed" data-i18n="lineStyleMixed" hidden>Разные стили</p>
+    </div>
+    <div class="control-group paint-popup line-ends-popup" id="line-ends-popup" role="group"
+      data-i18n-label="lineEnds" aria-label="Окончания" hidden>
+      <label class="line-style-option line-end-option" data-i18n-title="lineStartArrow">
+        <input type="checkbox" id="line-start" data-i18n-label="lineStartArrow" aria-label="Стрелка в начале линии">
+        <svg viewBox="0 0 48 16" aria-hidden="true"><path d="M4 8h40M10 2 4 8l6 6"/></svg>
+      </label>
+      <label class="line-style-option line-end-option" data-i18n-title="lineFinishArrow">
+        <input type="checkbox" id="line-end" data-i18n-label="lineFinishArrow" aria-label="Стрелка в конце линии">
+        <svg viewBox="0 0 48 16" aria-hidden="true"><path d="M4 8h40m-6-6 6 6-6 6"/></svg>
+      </label>
     </div>
 
     <section class="preview-stage paint-stage" id="stage" data-i18n-label="canvas" aria-label="Область рисования">
