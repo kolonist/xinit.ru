@@ -428,6 +428,17 @@ function shapeConnectionMarkers(geometry, minimumSideLength) {
   });
 }
 
+function shapeSideResizeMarkers(shape, minimumSideLength) {
+  const geometry = shapeConnectionGeometry(shape);
+  return shapeConnectionMarkers(geometry, minimumSideLength).flatMap(({ point, index }) => {
+    const side = geometry.sideMidpoints ? geometry.side[index] : geometry.side.find(edge => {
+      const length = distanceBetween(...edge);
+      return length >= minimumSideLength && distanceBetween(point, projectOntoSide(edge, point)) < length * 1e-6;
+    });
+    return side ? [{ point, side }] : [];
+  });
+}
+
 function connectionPoint(shape, toward, fallback, direction) {
   if (direction != null) {
     const axis = connectionAxes[direction];

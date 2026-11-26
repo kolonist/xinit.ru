@@ -686,7 +686,11 @@ function updateControls() {
   if (regionExportAction) hint = touchLayout.matches ? "exportRegionTouchHint" : "exportRegionHint";
   const showsConnectionHint = ["segmentHint", "segmentTouchHint", "endpointsSnapHint", "endpointsHint",
     "polylineHint", "polylineTouchHint", "polylineEditHint"].includes(hint);
-  toolHint.textContent = showsConnectionHint ? `${label("connectionAreasHint")} · ${label(hint)}` : label(hint);
+  const showsSideResizeHint = !crop && !textEdit && !regionExportAction &&
+    (activeTool === "select" || isFillableShape(activeTool)) &&
+    [...selection].some(shape => shape.shapeId && shapeSideResizeMarkers(shape, 0).length);
+  toolHint.textContent = [showsConnectionHint && label("connectionAreasHint"), label(hint),
+    showsSideResizeHint && label("sideResizeHint")].filter(Boolean).join(" · ");
   hintRow.toggleAttribute("data-connection-hint", showsConnectionHint);
   hintRow.toggleAttribute("data-export-region", Boolean(regionExportAction));
 }
@@ -1316,6 +1320,46 @@ function startResize(point, drawing) {
   return { kind: "resize", handle, fixed, frame, labels, transforms: selectionTransforms(), start: worldToObject(frame, point) };
 }
 
+function startSideResize(point, additive) {
+  if (crop || !selection.size) return null;
+  const touch = touchLayout.matches;
+  let nearest = (touch ? 14 : 8) / view.zoom;
+  let target;
+  for (const shape of selection) {
+    if (!shape.shapeId) continue;
+    for (const marker of shapeSideResizeMarkers(shape, 12 / view.zoom)) {
+      const distance = distanceBetween(point, marker.point);
+      if (distance > nearest) continue;
+      target = { ...marker, shape };
+      nearest = distance;
+    }
+  }
+  if (!target) return null;
+  const selectionBounds = selectionFrame();
+  if (handleAt(selectionBounds.bounds, point, nearest * view.zoom, selectionBounds)) return null;
+  const adjustments = shapeAdjustmentHandles(singleSelection());
+  if (adjustments.some(handle =>
+    distanceBetween(point, objectToWorld(target.shape, handle.point)) < (touch ? 7 : 5) / view.zoom)) return null;
+
+  const { shape, side: [first, last], point: marker } = target;
+  const length = distanceBetween(first, last);
+  const tangent = { x: (last.x - first.x) / length, y: (last.y - first.y) / length };
+  const normal = perpendicular(tangent);
+  const { min, max } = shapeProjectionRange(shape, normal);
+  const offset = projection(marker, normal);
+  // Keep the far support line fixed and apply the drag along the edge normal.
+  const span = offset - (offset - min > max - offset ? min : max);
+  if (Math.abs(span) < 1e-6) return null;
+  const frame = { ...marker, angle: Math.atan2(tangent.y, tangent.x), scaleX: 1, scaleY: 1 };
+  const fixed = { x: 0, y: -span };
+  const labels = new Map([...selection].filter(item => item.labelShapeId === shape.shapeId).map(item => [item, shape]));
+  const transforms = selectionTransforms([shape, ...labels.keys()]);
+  return {
+    kind: "resizeSide", frame, fixed, labels, transforms, normal, span, start: point,
+    toggleObject: additive ? objectAt(point) : null,
+  };
+}
+
 function startEndpointDrag(point, additive) {
   const object = selectedSegment();
   if (!object) return null;
@@ -1489,8 +1533,8 @@ function startSelection(point, additive) {
   return { kind: "marquee", bounds: rectangleBetween(point, point) };
 }
 
-function selectionTransforms() {
-  return [...selection].map(object => {
+function selectionTransforms(items = selection) {
+  return [...items].map(object => {
     const { x, y, scaleX, scaleY, angle = 0, shear = 0 } = object;
     const geometry = hasLineConnections(object)
       ? { end: object.end, points: object.points, path: object.path, arrowhead: object.arrowhead, bounds: object.bounds }
@@ -1617,13 +1661,28 @@ function resizeSelection(point, constrained) {
   let ratioX = Math.max(minSize / Math.abs(dx), proposedX / dx);
   let ratioY = Math.max(minSize / Math.abs(dy), proposedY / dy);
   if (constrained || singleSelection()?.type === "text") ratioX = ratioY = uniformRatio;
-  const resized = ratioX !== 1 || ratioY !== 1;
+  applySelectionResize({ transforms, labels, fixed, frame }, ratioX, ratioY, uniformRatio);
+}
+
+function resizeSide(point) {
+  const { normal, span, start } = gesture;
+  const distance = projection({ x: point.x - start.x, y: point.y - start.y }, normal);
+  const minRatio = Math.min(1, 6 / (view.zoom * Math.abs(span)));
+  const ratio = Math.max(minRatio, 1 + distance / span);
+  applySelectionResize(gesture, 1, ratio, 1);
+}
+
+function applySelectionResize({ transforms, labels, fixed, frame }, ratioX, ratioY, uniformRatio) {
+  if (ratioX === 1 && ratioY === 1) {
+    for (const { object, geometry, ...transform } of transforms) Object.assign(object, geometry, transform);
+    return;
+  }
   for (const original of transforms) {
     const { object, scaleX, scaleY, angle, shear } = original;
-    if (resized && labels.has(object)) continue;
+    if (labels.has(object)) continue;
     Object.assign(object, original.geometry);
     const relativeAngle = angle - frame.angle;
-    if (resized && object.type === "text") {
+    if (object.type === "text") {
       const scale = Math.sqrt(Math.abs(scaleX * scaleY)) * uniformRatio;
       Object.assign(object, { angle, scaleX: scale, scaleY: scale, shear: 0 });
     } else if (ratioX === ratioY || !relativeAngle) {
@@ -1648,9 +1707,7 @@ function resizeSelection(point, constrained) {
       y: fixed.y + (origin.y - fixed.y) * ratioY,
     }));
   }
-  if (resized) {
-    for (const [label, shape] of labels) layoutShapeLabel(context, label, shape);
-  }
+  for (const [label, shape] of labels) layoutShapeLabel(context, label, shape);
 }
 
 function resizeCrop(point) {
@@ -1763,8 +1820,10 @@ function startPointer(event) {
   const additive = primaryModifier(event);
   const startTarget = canEdit && !shiftHeld && ["line", "polyline"].includes(activeTool)
     ? connectionTargetAt(point, undefined, additive) : null;
+  const canResizeSide = activeTool === "select" || isFillableShape(activeTool);
   const edit = canEdit && (startEndpointDrag(point, additive) || startPolylineVertex(point, additive) ||
-    (!startTarget && (startShapeAdjustment(point, additive) || startRotation(point))));
+    (!startTarget && ((canResizeSide && startSideResize(point, additive)) ||
+      startShapeAdjustment(point, additive) || startRotation(point))));
   const resize = canEdit && !startTarget && !["select", "text"].includes(activeTool) ? startResize(point, true) : null;
   if (pan) {
     gesture = { kind: "pan", id: event.pointerId, start: screen, x: view.x, y: view.y };
@@ -1839,6 +1898,10 @@ function movePointer(event) {
     }
     case "resize":
       resizeSelection(point, primaryModifier(event));
+      sceneDirty = true;
+      break;
+    case "resizeSide":
+      resizeSide(point);
       sceneDirty = true;
       break;
     case "endpoint":
@@ -1960,7 +2023,7 @@ function finishPointer(event, cancelled) {
         }));
       }
       if (kind === "exportRegion") exportSelectedRegion(bounds);
-      if (["move", "resize", "rotate", "endpoint", "polylineVertex", "adjustShape"].includes(kind)) commitSceneEdit();
+      if (["move", "resize", "resizeSide", "rotate", "endpoint", "polylineVertex", "adjustShape"].includes(kind)) commitSceneEdit();
       if (kind === "pan") persistScene(false);
     }
   }
