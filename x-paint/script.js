@@ -56,6 +56,7 @@ const modifierKey = appleKeyboard ? "Meta" : "Control";
 const modifierLabel = appleKeyboard ? "Cmd" : "Ctrl";
 
 textContent.style.font = paintFont;
+textContent.style.fontVariantLigatures = "none";
 textContent.style.lineHeight = `${paintLineHeight}px`;
 
 const colors = [

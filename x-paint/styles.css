@@ -1,3 +1,9 @@
+@font-face {
+  font-family: "JetBrains Mono NL";
+  src: url("fonts/JetBrainsMonoNL-Regular.ttf") format("truetype");
+  font-display: swap;
+}
+
 .paint-page {
   --paint-inset: 0.65rem;
   height: 100vh;

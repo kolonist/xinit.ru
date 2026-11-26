@@ -1,6 +1,6 @@
 "use strict";
 
-const paintFont = '24px "JetBrains Mono", monospace';
+const paintFont = '24px "JetBrains Mono NL", monospace';
 const paintLineHeight = 34;
 const paintTextBaseline = 25;
 const defaultStrokeWeight = 3;
