@@ -1198,9 +1198,7 @@ function objectAt(point, includeShapeInterior = false) {
 
 function worldShapePath(shape) {
   const { a, b, c, d } = objectMatrix(shape);
-  const path = new Path2D();
-  path.addPath(shape.path, new DOMMatrix([a, b, c, d, shape.x, shape.y]));
-  return path;
+  return transformPaintPath(shape.path, new DOMMatrix([a, b, c, d, shape.x, shape.y]));
 }
 
 function connectionTargetAt(point, excludedId, constrained) {
@@ -1292,15 +1290,30 @@ function selectionFrame() {
 }
 
 function startResize(point, drawing) {
-  if (!selection.size || hasLineEnds(singleSelection())) return null;
+  const object = singleSelection();
+  if (!selection.size || hasLineEnds(object)) return null;
   const frame = selectionFrame();
   const { bounds } = frame;
   // Leave space for closely spaced brush strokes while a drawing tool is active.
   if (drawing && Math.min(bounds.right - bounds.left, bounds.bottom - bounds.top) * view.zoom < 16) return null;
   const hit = handleAt(bounds, point, drawing ? 6 : 12, frame);
-  return hit ? {
-    kind: "resize", ...hit, frame, transforms: selectionTransforms(), start: worldToObject(frame, point),
-  } : null;
+  if (!hit) return null;
+  let { handle, fixed } = hit;
+  if (hasFixedStroke(object) && Math.min(bounds.right - bounds.left, bounds.bottom - bounds.top) > object.weight) {
+    // Resize the geometry between the handles while keeping the stroke width fixed.
+    const halfStroke = object.weight / 2;
+    const dx = Math.sign(handle.x - fixed.x) * halfStroke;
+    const dy = Math.sign(handle.y - fixed.y) * halfStroke;
+    handle = { x: handle.x - dx, y: handle.y - dy };
+    fixed = { x: fixed.x + dx, y: fixed.y + dy };
+  }
+  const shapes = new Map([...selection].filter(item => item.shapeId).map(shape => [shape.shapeId, shape]));
+  const labels = new Map();
+  for (const item of selection) {
+    const shape = shapes.get(item.labelShapeId);
+    if (shape) labels.set(item, shape);
+  }
+  return { kind: "resize", handle, fixed, frame, labels, transforms: selectionTransforms(), start: worldToObject(frame, point) };
 }
 
 function startEndpointDrag(point, additive) {
@@ -1592,24 +1605,28 @@ function arrangeSelection(axis, distribute) {
 }
 
 function resizeSelection(point, constrained) {
-  const { transforms, fixed, handle, start, frame } = gesture;
+  const { transforms, labels, fixed, handle, start, frame } = gesture;
   const local = worldToObject(frame, point);
   const dx = handle.x - fixed.x;
   const dy = handle.y - fixed.y;
   const proposedX = dx + local.x - start.x;
   const proposedY = dy + local.y - start.y;
   const minSize = Math.min(6 / view.zoom, Math.abs(dx), Math.abs(dy));
+  const diagonalRatio = (proposedX * dx + proposedY * dy) / (dx * dx + dy * dy);
+  const uniformRatio = Math.max(minSize / Math.min(Math.abs(dx), Math.abs(dy)), diagonalRatio);
   let ratioX = Math.max(minSize / Math.abs(dx), proposedX / dx);
   let ratioY = Math.max(minSize / Math.abs(dy), proposedY / dy);
-  if (constrained) {
-    const ratio = (proposedX * dx + proposedY * dy) / (dx * dx + dy * dy);
-    ratioX = ratioY = Math.max(minSize / Math.min(Math.abs(dx), Math.abs(dy)), ratio);
-  }
+  if (constrained || singleSelection()?.type === "text") ratioX = ratioY = uniformRatio;
+  const resized = ratioX !== 1 || ratioY !== 1;
   for (const original of transforms) {
     const { object, scaleX, scaleY, angle, shear } = original;
+    if (resized && labels.has(object)) continue;
     Object.assign(object, original.geometry);
     const relativeAngle = angle - frame.angle;
-    if (ratioX === ratioY || !relativeAngle) {
+    if (resized && object.type === "text") {
+      const scale = Math.sqrt(Math.abs(scaleX * scaleY)) * uniformRatio;
+      Object.assign(object, { angle, scaleX: scale, scaleY: scale, shear: 0 });
+    } else if (ratioX === ratioY || !relativeAngle) {
       object.angle = angle;
       object.scaleX = scaleX * ratioX;
       object.scaleY = scaleY * ratioY;
@@ -1630,6 +1647,9 @@ function resizeSelection(point, constrained) {
       x: fixed.x + (origin.x - fixed.x) * ratioX,
       y: fixed.y + (origin.y - fixed.y) * ratioY,
     }));
+  }
+  if (resized) {
+    for (const [label, shape] of labels) layoutShapeLabel(context, label, shape);
   }
 }
 
@@ -2007,26 +2027,52 @@ function shapeLabelDraft() {
   return object;
 }
 
+function positionShapeLabelEditor(shape, lineCount, width, height) {
+  const hasText = Boolean(textContent.value.trim());
+  const object = hasText ? shapeLabelDraft() : textEdit.object;
+  const editorWidth = hasText ? Math.ceil(object.bounds.right) + 12 : 80;
+  const editorHeight = lineCount * paintLineHeight;
+  const center = hasText ? objectToWorld(object, {
+    x: object.bounds.right / 2, y: object.bounds.bottom / 2,
+  }) : shapeCenter(shape);
+  const matrix = hasText ? objectMatrix(object) : { a: 1, b: 0, c: 0, d: 1 };
+  const bounds = transformedBounds({
+    left: -editorWidth / 2, top: -editorHeight / 2, right: editorWidth / 2, bottom: editorHeight / 2,
+  }, matrix, 0, 0);
+  const margin = Math.min(4, width / 4, height / 4);
+  const zoom = Math.min(view.zoom, (width - 2 * margin) / (bounds.right - bounds.left),
+    (height - 2 * margin) / (bounds.bottom - bounds.top));
+  const centerX = Math.max(margin - bounds.left * zoom,
+    Math.min(width - margin - bounds.right * zoom, view.x + center.x * view.zoom));
+  const centerY = Math.max(margin - bounds.top * zoom,
+    Math.min(height - margin - bounds.bottom * zoom, view.y + center.y * view.zoom));
+  const { a, b, c, d } = matrix;
+  textContent.style.left = `${centerX - (a * editorWidth + c * editorHeight) * zoom / 2}px`;
+  textContent.style.top = `${centerY - (b * editorWidth + d * editorHeight) * zoom / 2}px`;
+  textContent.style.width = `${editorWidth}px`;
+  textContent.style.height = `${editorHeight}px`;
+  textContent.style.transform = `matrix(${a * zoom}, ${b * zoom}, ${c * zoom}, ${d * zoom}, 0, 0)`;
+}
+
 function positionTextEditor() {
-  const { shape } = textEdit;
-  const object = shape ? shapeLabelDraft() : textEdit.object;
+  const { object, shape } = textEdit;
   const { clientWidth: width, clientHeight: height } = canvas;
   if (!width || !height) return;
+  const lines = textContent.value.split("\n");
+  if (shape) {
+    positionShapeLabelEditor(shape, lines.length, width, height);
+    return;
+  }
   const scaleX = Math.max(0.5, object.scaleX * view.zoom);
   const scaleY = Math.min(height / paintLineHeight, Math.max(0.5, object.scaleY * view.zoom));
-  const lines = textContent.value.split("\n");
   const contentWidth = Math.max(80, Math.ceil(textWidth(context, lines)) + 24);
   const { a, b, c, d } = objectMatrix({ ...object, scaleX, scaleY, shear: (object.shear ?? 0) * view.zoom });
-  const center = shape && shapeCenter(shape);
-  const editorWidth = center ? Math.max(contentWidth, Math.ceil(textWidth(context, ["WWWWWWWWW"])) + 24) : contentWidth;
   const editorHeight = lines.length * paintLineHeight;
-  const originX = center ? center.x * view.zoom - (a * editorWidth + c * editorHeight) / 2 : object.x * view.zoom;
-  const originY = center ? center.y * view.zoom - (b * editorWidth + d * editorHeight) / 2 : object.y * view.zoom;
-  const x = Math.max(0, Math.min(width - 44, view.x + originX));
-  const y = Math.max(0, Math.min(height - paintLineHeight * scaleY, view.y + originY));
+  const x = Math.max(0, Math.min(width - 44, view.x + object.x * view.zoom));
+  const y = Math.max(0, Math.min(height - paintLineHeight * scaleY, view.y + object.y * view.zoom));
   textContent.style.left = `${x}px`;
   textContent.style.top = `${y}px`;
-  textContent.style.width = `${Math.min(editorWidth, (width - x) / scaleX)}px`;
+  textContent.style.width = `${Math.min(contentWidth, (width - x) / scaleX)}px`;
   textContent.style.height = `${Math.min(editorHeight, (height - y) / scaleY)}px`;
   textContent.style.transform = `matrix(${a}, ${b}, ${c}, ${d}, 0, 0)`;
 }
@@ -2034,6 +2080,13 @@ function positionTextEditor() {
 function closeTextEditor() {
   textEdit = null;
   textContent.hidden = true;
+}
+
+function removeShapeLabel(items, labelIndex, shapeIndex) {
+  const shape = items[shapeIndex];
+  const groupId = shape.groupId;
+  items.splice(labelIndex, 1);
+  if (groupId && !items.some(item => item !== shape && item.groupId === groupId)) delete shape.groupId;
 }
 
 function finishTextEdit(apply, focusCanvas = false) {
@@ -2054,6 +2107,11 @@ function finishTextEdit(apply, focusCanvas = false) {
     } else if (isNew) objects.push(object);
     activeTool = "select";
     setSelection([object], { fromDrawing: isNew });
+    commitSceneEdit();
+  } else if (apply && shape && !isNew) {
+    removeShapeLabel(objects, objects.indexOf(object), objects.indexOf(shape));
+    activeTool = "select";
+    setSelection([shape]);
     commitSceneEdit();
   } else {
     updateControls();
@@ -2264,15 +2322,19 @@ function currentPaintScene(includePolyline = false) {
   const savedObjects = objects.map(savePaintObject);
   const line = includePolyline ? polylineDraftSnapshot() : null;
   if (line) savedObjects.push(savePaintObject(line));
-  if (textEdit && textContent.value.trim()) {
-    const { shape, isNew } = textEdit;
-    const savedText = savePaintObject(shape ? shapeLabelDraft() : { ...textEdit.object, text: textContent.value });
-    if (isNew && shape) {
-      const index = objects.indexOf(shape);
-      savedObjects[index].groupId = savedText.groupId;
-      savedObjects.splice(index + 1, 0, savedText);
-    } else if (isNew) savedObjects.push(savedText);
-    else savedObjects[objects.indexOf(textEdit.object)] = savedText;
+  if (textEdit) {
+    const { object, shape, isNew } = textEdit;
+    if (textContent.value.trim()) {
+      const savedText = savePaintObject(shape ? shapeLabelDraft() : { ...object, text: textContent.value });
+      if (isNew && shape) {
+        const index = objects.indexOf(shape);
+        savedObjects[index].groupId = savedText.groupId;
+        savedObjects.splice(index + 1, 0, savedText);
+      } else if (isNew) savedObjects.push(savedText);
+      else savedObjects[objects.indexOf(object)] = savedText;
+    } else if (shape && !isNew) {
+      removeShapeLabel(savedObjects, objects.indexOf(object), objects.indexOf(shape));
+    }
   }
   return {
     objects: savedObjects,

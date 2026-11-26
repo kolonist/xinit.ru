@@ -2,6 +2,7 @@
 
 const paintFont = '24px "JetBrains Mono", monospace';
 const paintLineHeight = 34;
+const paintTextBaseline = 25;
 const defaultStrokeWeight = 3;
 const defaultMarkerWeight = 16;
 const lineStartArrow = 1;
@@ -180,7 +181,11 @@ function worldToObject(object, point) {
 }
 
 function worldBounds(object) {
-  return transformedBounds(object.bounds, objectMatrix(object), object.x, object.y);
+  const { bounds, x, y } = object;
+  const matrix = objectMatrix(object);
+  if (!hasFixedStroke(object)) return transformedBounds(bounds, matrix, x, y);
+  const halfStroke = object.weight / 2;
+  return padBounds(transformedBounds(padBounds(bounds, -halfStroke), matrix, x, y), halfStroke);
 }
 
 function transformedBounds({ left, top, right, bottom }, { a, b, c, d }, x, y) {
@@ -233,6 +238,10 @@ function isSegment(object) {
 
 function hasLineEnds(object) {
   return isSegment(object) || object?.type === "polyline";
+}
+
+function hasFixedStroke(object) {
+  return Boolean(object?.shapeId) || hasLineEnds(object);
 }
 
 function hasLineConnections(object) {
@@ -780,42 +789,64 @@ function measureTextObject(context, object) {
 
 function layoutShapeLabel(context, object, shape) {
   const { x, y } = shape.end;
-  const center = { x: x / 2, y: y / 2 };
-  const { a, b, c, d } = objectMatrix(shape);
-  const horizontalScale = Math.hypot(a, b);
-  const verticalScale = Math.hypot(c, d);
-  const width = Math.max(object.bounds.right, textWidth(context, ["WWWWWWWWW"]));
-  const halfWidth = (width / 2 + 3) / horizontalScale;
-  const halfHeight = (object.bounds.bottom / 2 + 3) / verticalScale;
-  let scale = Math.min(1, Math.abs(x) / (2 * halfWidth), Math.abs(y) / (2 * halfHeight));
-  const inset = 0.9;
+  const { scaleX, scaleY, shear = 0, angle = 0 } = shape;
+  const center = { x: (scaleX * x + shear * y) / 2, y: scaleY * y / 2 };
   context.save();
+  context.font = paintFont;
+  context.textAlign = "center";
+  context.textBaseline = "alphabetic";
+  let inkHalfWidth = object.bounds.right / 2;
+  let inkTop = Infinity;
+  let inkBottom = -Infinity;
+  object.lines.forEach((line, index) => {
+    if (!line.trim()) return;
+    const metrics = context.measureText(line);
+    const baseline = paintTextBaseline + index * paintLineHeight;
+    inkHalfWidth = Math.max(inkHalfWidth, metrics.actualBoundingBoxLeft, metrics.actualBoundingBoxRight);
+    inkTop = Math.min(inkTop, baseline - metrics.actualBoundingBoxAscent);
+    inkBottom = Math.max(inkBottom, baseline + metrics.actualBoundingBoxDescent);
+  });
+  if (inkTop === Infinity) {
+    inkTop = 0;
+    inkBottom = object.bounds.bottom;
+  }
+
+  const fillRatio = 0.82;
+  const halfWidth = inkHalfWidth / fillRatio;
+  const halfHeight = Math.max(1, inkBottom - inkTop) / (2 * fillRatio);
+  const halfStroke = shape.weight / 2;
+  const shapeWidth = Math.abs(scaleX * x) + Math.abs(shear * y);
+  const shapeHeight = Math.abs(scaleY * y);
+  let scale = Math.max(0, Math.min((shapeWidth / 2 - halfStroke) / halfWidth,
+    (shapeHeight / 2 - halfStroke) / halfHeight));
+  // Fit in the shape's rotated frame, with its scaling and shear already applied to the path.
+  const transform = scaleX !== 1 || scaleY !== 1 || shear ? new DOMMatrix([scaleX, 0, shear, scaleY, 0, 0]) : null;
+  const outline = transformPaintPath(shape.path, transform);
   context.resetTransform();
   const fits = size => [-1, 0, 1].every(vertical => [-1, 1].every(horizontal =>
-    context.isPointInPath(shape.path, center.x + horizontal * halfWidth * size, center.y + vertical * halfHeight * size)));
-  if (!fits(scale / inset)) {
+    context.isPointInPath(outline, center.x + horizontal * (halfWidth * size + halfStroke),
+      center.y + vertical * (halfHeight * size + halfStroke))));
+  if (!fits(scale)) {
     let low = 0;
     let high = scale;
     for (let index = 0; index < 20; index++) {
       const middle = (low + high) / 2;
-      if (fits(middle / inset)) low = middle;
+      if (fits(middle)) low = middle;
       else high = middle;
     }
     scale = low;
   }
   context.restore();
-  const scaleX = Math.max(scale, Number.EPSILON) / horizontalScale;
-  const scaleY = Math.max(scale, Number.EPSILON) / verticalScale;
-  const origin = objectToWorld(shape, {
-    x: center.x - object.bounds.right * scaleX / 2,
-    y: center.y - object.bounds.bottom * scaleY / 2,
+  if (scale > 1) {
+    const enlargedFillRatio = 0.52;
+    scale = Math.max(1, scale * enlargedFillRatio / fillRatio);
+  }
+  scale = Math.max(scale, Number.EPSILON);
+  const origin = objectToWorld({ ...shapeCenter(shape), angle, scaleX: scale, scaleY: scale }, {
+    x: -object.bounds.right / 2,
+    y: -(inkTop + inkBottom) / 2,
   });
-  Object.assign(object, origin, {
-    scaleX: shape.scaleX * scaleX,
-    scaleY: shape.scaleY * scaleY,
-    angle: shape.angle,
-    shear: (shape.shear ?? 0) * scaleY,
-  });
+  Object.assign(object, origin, { scaleX: scale, scaleY: scale, angle, shear: 0 });
 }
 
 function createImageObject(image, blob, center) {
@@ -845,15 +876,33 @@ function applyImageCrop(object, bounds) {
   object.bounds = { left: 0, top: 0, right: width, bottom: height };
 }
 
+function transformPaintPath(path, transform) {
+  if (!transform) return path;
+  const transformed = new Path2D();
+  transformed.addPath(path, transform);
+  return transformed;
+}
+
 function drawObject(context, object) {
   if (object.type === "marker") {
     drawHighlighter(context, object);
     return;
   }
-  const { a, b, c, d } = objectMatrix(object);
   context.save();
-  context.transform(a, b, c, d, object.x, object.y);
   context.fillStyle = context.strokeStyle = object.color || "#fff";
+  let pathTransform;
+  if (hasFixedStroke(object)) {
+    const { x, y, angle = 0, scaleX, scaleY, shear = 0 } = object;
+    context.translate(x, y);
+    if (angle) context.rotate(angle);
+    // Scale the path so its stroke only follows the canvas zoom.
+    if (scaleX !== 1 || scaleY !== 1 || shear) {
+      pathTransform = new DOMMatrix([scaleX, 0, shear, scaleY, 0, 0]);
+    }
+  } else {
+    const { a, b, c, d } = objectMatrix(object);
+    context.transform(a, b, c, d, object.x, object.y);
+  }
 
   if (object.type === "image") {
     const { x, y, width, height } = object.source;
@@ -864,22 +913,23 @@ function drawObject(context, object) {
     const centered = object.labelShapeId !== undefined;
     context.textAlign = centered ? "center" : "left";
     const x = centered ? object.bounds.right / 2 : 0;
-    object.lines.forEach((line, index) => context.fillText(line, x, 25 + index * paintLineHeight));
+    object.lines.forEach((line, index) => context.fillText(line, x, paintTextBaseline + index * paintLineHeight));
   } else {
+    const path = transformPaintPath(object.path, pathTransform);
     if (object.fill) {
       context.save();
       context.globalAlpha = 1 - (object.fillTransparency ?? 0) / 100;
       context.fillStyle = object.fill;
-      context.fill(object.path);
+      context.fill(path);
       context.restore();
     }
-    drawStrokePath(context, object);
+    drawStrokePath(context, object, path, pathTransform);
   }
 
   context.restore();
 }
 
-function drawStrokePath(context, object) {
+function drawStrokePath(context, object, path = object.path, pathTransform) {
   const { weight, lineStyle, arrowhead, detailPath } = object;
   context.lineWidth = weight;
   context.lineCap = context.lineJoin = "round";
@@ -891,29 +941,34 @@ function drawStrokePath(context, object) {
   }
   if (lineStyle === "dashed") context.setLineDash([weight * 3, weight * 2.5]);
   if (lineStyle === "dotted") context.setLineDash([0.01, weight * 2.65]);
-  context.stroke(object.path);
-  if (detailPath) context.stroke(detailPath);
+  context.stroke(path);
+  if (detailPath) context.stroke(transformPaintPath(detailPath, pathTransform));
   if (arrowhead) {
     context.setLineDash([]);
-    context.stroke(arrowhead);
+    context.stroke(transformPaintPath(arrowhead, pathTransform));
   }
 }
 
 function objectContainsPoint(context, object, point, tolerance, includeShapeInterior = false) {
   if (!containsPoint(padBounds(worldBounds(object), tolerance), point)) return false;
   const local = worldToObject(object, point);
-  const localTolerance = tolerance / Math.min(object.scaleX, object.scaleY);
+  const fixedStroke = hasFixedStroke(object);
+  const localTolerance = fixedStroke ? tolerance : tolerance / Math.min(object.scaleX, object.scaleY);
   if (!object.path || object.points?.length === 1) return containsPoint(padBounds(object.bounds, localTolerance), local);
 
+  const { a, b, c, d } = objectMatrix(object);
+  const transform = fixedStroke ? new DOMMatrix([a, b, c, d, object.x, object.y]) : null;
+  const path = transformPaintPath(object.path, transform);
   context.save();
+  context.resetTransform();
   context.lineWidth = object.weight + localTolerance * 2;
   context.lineCap = context.lineJoin = "round";
-  const { x, y } = local;
+  const { x, y } = fixedStroke ? point : local;
   const hit = (((object.fill && object.fillTransparency !== 100) || (includeShapeInterior && object.shapeId)) &&
-    context.isPointInPath(object.path, x, y)) ||
-    context.isPointInStroke(object.path, x, y) ||
-    (object.detailPath && context.isPointInStroke(object.detailPath, x, y)) ||
-    (object.arrowhead && context.isPointInStroke(object.arrowhead, x, y));
+    context.isPointInPath(path, x, y)) ||
+    context.isPointInStroke(path, x, y) ||
+    (object.detailPath && context.isPointInStroke(transformPaintPath(object.detailPath, transform), x, y)) ||
+    (object.arrowhead && context.isPointInStroke(transformPaintPath(object.arrowhead, transform), x, y));
   context.restore();
   return hit;
 }
